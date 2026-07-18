@@ -4,7 +4,8 @@ from pathlib import Path
 
 
 
-BASE_DIR = Path(__file__).resolve().parent.parent
+# app/core/config.py -> app/core -> app -> project root
+BASE_DIR = Path(__file__).resolve().parent.parent.parent
 load_dotenv(BASE_DIR / ".env")
 
 API_KEY = os.getenv("API_KEY")

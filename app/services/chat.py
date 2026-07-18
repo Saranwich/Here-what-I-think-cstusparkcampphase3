@@ -2,7 +2,8 @@
 
 from redis.asyncio import Redis
 
-from app.services import memory, openai
+from app.clients import llm
+from app.services import memory
 
 SYSTEM_PROMPT = "You are a helpful assistant. Reply concisely."
 
@@ -10,7 +11,7 @@ SYSTEM_PROMPT = "You are a helpful assistant. Reply concisely."
 async def reply(r: Redis, session_id: str, message: str) -> str:
     history = await memory.load(r, session_id)
 
-    answer = await openai.chat(
+    answer = await llm.chat(
         [{"role": "system", "content": SYSTEM_PROMPT}]
         + history
         + [{"role": "user", "content": message}]

@@ -1,5 +1,5 @@
 from openai import OpenAI
-from app.config import OPENAI_API_ENDPOINT, API_KEY
+from app.core.config import OPENAI_API_ENDPOINT, API_KEY
 
 client = OpenAI(
     api_key=API_KEY,
