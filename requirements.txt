@@ -1,0 +1,6 @@
+uvicorn
+fastapi
+openai
+python-dotenv
+redis
+line-bot-sdk
