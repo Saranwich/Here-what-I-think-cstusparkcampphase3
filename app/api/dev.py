@@ -4,8 +4,8 @@ from fastapi import APIRouter, Depends
 from redis.asyncio import Redis
 
 from app.api.deps import get_redis
-from app.clients import llm
-from app.services import chat
+from app.clients import llm, storage
+from app.services import chat, draft, memory, survey
 
 router = APIRouter(prefix="/api")
 
@@ -28,3 +28,47 @@ async def chat_test(
 ):
     """Playground + Redis memory. Same session_id keeps the conversation."""
     return await chat.reply(r, session_id, message)
+
+
+@router.get("/survey")
+async def survey_test(
+    message: str,
+    session_id: str = "devtest",
+    latitude: float | None = None,
+    longitude: float | None = None,
+    location_text: str | None = None,
+    image_key: str | None = None,
+    source: str = "user",
+    r: Redis = Depends(get_redis),
+):
+    """น้องเมือง, without LINE. latitude/longitude/location_text stand in for the
+    share-location button, image_key for a photo that was already stored;
+    source is "broadcast" when replying to a card we pushed."""
+    return await survey.reply(
+        r, session_id, message, latitude, longitude, location_text, image_key, source
+    )
+
+
+@router.get("/survey/draft")
+async def survey_draft(session_id: str = "devtest", r: Redis = Depends(get_redis)):
+    """What has been collected so far, and what is still missing."""
+    report = await draft.load(r, session_id)
+    return {
+        "report": report,
+        "missing": survey.missing(report),
+        "next_goal": survey.next_goal(report),
+    }
+
+
+@router.delete("/survey/draft")
+async def survey_reset(session_id: str = "devtest", r: Redis = Depends(get_redis)):
+    """Start the conversation over."""
+    await draft.clear(r, session_id)
+    await memory.clear(r, session_id)
+    return {"cleared": session_id}
+
+
+@router.get("/reports")
+async def reports():
+    """Everything that made it to the permanent store."""
+    return await storage.list_reports()

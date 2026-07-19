@@ -48,3 +48,4 @@ Thumbs.db
 *.log
 *.db
 *.sqlite3
+dump.rdb
