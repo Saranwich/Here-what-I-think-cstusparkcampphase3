@@ -14,10 +14,15 @@ import json
 from redis.asyncio import Redis
 
 TTL_SECONDS = 60 * 60
+DONE_TTL_SECONDS = 30 * 60   # หลังปิดใบ จำไว้ครึ่งชั่วโมงว่าเพิ่งคุยจบไป
 
 
 def _key(session_id: str) -> str:
     return f"survey:{session_id}"
+
+
+def _done_key(session_id: str) -> str:
+    return f"survey:{session_id}:done"
 
 
 async def load(r: Redis, session_id: str) -> dict:
@@ -44,3 +49,19 @@ async def merge(r: Redis, session_id: str, fields: dict) -> None:
 
 async def clear(r: Redis, session_id: str) -> None:
     await r.delete(_key(session_id))
+
+
+# ---- ป้ายเล็ก ๆ ว่า "เพิ่งคุยจบไป" --------------------------------------
+# กันไม่ให้พิมพ์ "ครับ" ท้ายบทแล้วบอทเปิดใบใหม่ทันทีแล้วเริ่มสัมภาษณ์ใหม่
+
+
+async def mark_done(r: Redis, session_id: str, report_id: int) -> None:
+    await r.set(_done_key(session_id), report_id, ex=DONE_TTL_SECONDS)
+
+
+async def just_finished(r: Redis, session_id: str) -> bool:
+    return await r.exists(_done_key(session_id)) == 1
+
+
+async def clear_done(r: Redis, session_id: str) -> None:
+    await r.delete(_done_key(session_id))

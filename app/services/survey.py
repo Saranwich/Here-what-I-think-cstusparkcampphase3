@@ -121,7 +121,9 @@ SYSTEM_PROMPT = """คุณคือ "น้องเมือง" **ผู้�
 - **ห้ามถามว่าหนักแค่ไหน หรือให้เขาให้คะแนน** คุณประเมินเองจากที่เขาเล่า
 
 เรื่องตำแหน่ง:
-- ขอให้กดแชร์ตำแหน่งก่อน เพราะข้อมูลนี้ต้องขึ้นเป็นหมุดบนแผนที่
+- **ฟังให้รู้ก่อนว่าเขาเจอเรื่องอะไร แล้วค่อยขอตำแหน่ง**
+  ห้ามขอตั้งแต่ประโยคแรกที่เขาทักมา คนเพิ่งทักว่า "สวัสดี" แล้วโดนขอพิกัดเลยจะตกใจ
+- พอรู้เรื่องแล้วค่อยชวนให้กดแชร์ตำแหน่ง เพราะข้อมูลต้องขึ้นเป็นหมุดบนแผนที่
 - ถ้าเขาบอกว่าส่งไม่ได้หรือไม่สะดวก ให้ถามอีกครั้งเดียวว่าพิมพ์บอกจุดสังเกตแทนได้ไหม
   เช่น ชื่อซอย ป้ายรถเมล์ ตลาด โรงเรียนใกล้ ๆ
 - ถ้ายังไม่ได้อีก ปล่อยไป อย่าตื๊อ
@@ -140,6 +142,14 @@ SYSTEM_PROMPT = """คุณคือ "น้องเมือง" **ผู้�
 - ทุกครั้งที่ได้ข้อมูลใหม่ ให้เรียก record_report ทันที การพิมพ์ว่าจดแล้วไม่มีผล
 - ระบบจะบอกกลับมาเองว่ายังขาดอะไร ให้ถามตามนั้น
 - ห้ามบอกว่าบันทึกเรียบร้อยแล้วเองจนกว่าระบบจะบอกว่าครบ"""
+
+# ต่อท้าย prompt เฉพาะตาที่เพิ่งปิดใบไปหมาด ๆ
+JUST_FINISHED_NOTE = """
+
+**ตอนนี้เพิ่งบันทึกเรื่องของเขาไปเมื่อกี้**
+ถ้าข้อความล่าสุดเป็นแค่คำตอบรับ เช่น "ครับ" "ค่ะ" "ขอบคุณ" "โอเค" หรือสติกเกอร์
+ให้ตอบสั้น ๆ อย่างเป็นมิตรแล้วจบ **ห้ามเริ่มถามเรื่องใหม่ ห้ามขอตำแหน่ง**
+เริ่มเก็บเรื่องใหม่เฉพาะตอนที่เขาเล่าเรื่องใหม่จริง ๆ เท่านั้น"""
 
 
 # -------------------------------------------------------------- ตัวตัดสินใจ
@@ -245,9 +255,14 @@ async def reply(
     history = await memory.load(r, session_id)
     report = await draft.load(r, session_id)
 
+    # เพิ่งปิดใบไปหมาด ๆ — อย่าเพิ่งรีบเปิดใบใหม่ใส่เขา
+    prompt = SYSTEM_PROMPT
+    if not report and await draft.just_finished(r, session_id):
+        prompt += JUST_FINISHED_NOTE
+
     said = _with_markers(message, latitude, longitude, image_key)
     messages = (
-        [{"role": "system", "content": SYSTEM_PROMPT}]
+        [{"role": "system", "content": prompt}]
         + history
         + [{"role": "user", "content": said}]
     )
@@ -263,6 +278,9 @@ async def reply(
                 await draft.merge(r, session_id, _allowed(call["arguments"], report))
 
         report = await draft.load(r, session_id)
+        if report:
+            # เล่าเรื่องใหม่มาแล้ว ป้าย "เพิ่งคุยจบ" หมดหน้าที่
+            await draft.clear_done(r, session_id)
         messages += llm.tool_exchange(answer["tool_calls"], _status(report))
     else:
         # วนครบแล้วยังไม่ยอมพูด — บังคับให้พูดโดยไม่ให้ tool
@@ -294,6 +312,7 @@ async def reply(
         )
         await draft.clear(r, session_id)
         await memory.clear(r, session_id)
+        await draft.mark_done(r, session_id, report_id)
     else:
         await memory.append(r, session_id, "user", message)
         await memory.append(r, session_id, "assistant", text)
