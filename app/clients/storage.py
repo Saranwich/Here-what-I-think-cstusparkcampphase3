@@ -21,6 +21,7 @@
     );
 
     CREATE INDEX reports_geom_idx ON reports USING GIST (geom);
+    CREATE INDEX reports_session_idx ON reports (session_id, created_at DESC);
 
 geom มาจาก ST_MakePoint(longitude, latitude) — longitude มาก่อน ไม่ใช่ latitude
 แถวที่ไม่มี geom จะไม่ขึ้นเป็นหมุดบนแผนที่ แต่ยังใช้นับสถิติได้
@@ -56,6 +57,33 @@ async def list_reports() -> list[dict]:
         return []
     with REPORTS_FILE.open(encoding="utf-8") as f:
         return [json.loads(line) for line in f if line.strip()]
+
+
+async def last_location(session_id: str) -> dict | None:
+    """ตำแหน่งล่าสุดที่คนนี้เคยแจ้งไว้ คืน None ถ้าไม่เคยมี
+
+    ถามจากที่เก็บหลัก ไม่เอาไปกองไว้ใน Redis เพราะ Redis อยู่บน RAM
+    คนใช้เยอะ ๆ แล้วจะบวม ส่วนตรงนี้ Postgres ตอบได้อยู่แล้วด้วย index
+
+        SELECT ST_Y(geom::geometry) AS latitude,
+               ST_X(geom::geometry) AS longitude,
+               location_text
+          FROM reports
+         WHERE session_id = $1 AND geom IS NOT NULL
+         ORDER BY created_at DESC
+         LIMIT 1;
+    """
+    for row in reversed(await list_reports()):
+        if row.get("session_id") != session_id:
+            continue
+        if row.get("latitude") is None or row.get("longitude") is None:
+            continue
+        return {
+            "latitude": row["latitude"],
+            "longitude": row["longitude"],
+            "location_text": row.get("location_text"),
+        }
+    return None
 
 
 def _next_id() -> int:

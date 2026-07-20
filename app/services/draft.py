@@ -16,6 +16,9 @@ from redis.asyncio import Redis
 TTL_SECONDS = 60 * 60
 DONE_TTL_SECONDS = 30 * 60   # หลังปิดใบ จำไว้ครึ่งชั่วโมงว่าเพิ่งคุยจบไป
 
+# ทุกอย่างในไฟล์นี้เป็นของชั่วคราวที่หายได้ และมี TTL เสมอ
+# ของที่ต้องอยู่ยาวห้ามมาไว้ตรงนี้ Redis อยู่บน RAM เดี๋ยวบวม
+
 
 def _key(session_id: str) -> str:
     return f"survey:{session_id}"
