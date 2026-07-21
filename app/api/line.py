@@ -139,4 +139,5 @@ async def answer(
         session,
         result["reply"],
         ask_location=result["asking_location"],
+        ask_photo=result["asking_photo"],
     )

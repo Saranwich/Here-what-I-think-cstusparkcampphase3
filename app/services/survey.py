@@ -30,6 +30,7 @@ TIMES_OF_DAY = ["morning", "afternoon", "evening", "night"]
 
 MIN_NOTES_CHARS = 20        # กัน AI เติม notes สั้น ๆ แล้วปิดเคสทั้งที่ยังไม่ได้อะไร
 MAX_LOCATION_ASKS = 2       # ขอพิกัด 2 หนแล้วพอ ไม่ตื๊อ
+MAX_PHOTO_ASKS = 1          # รูปขอครั้งเดียว ไม่ได้ก็ไม่เป็นไร มันเป็นของแถม
 
 FIELD_NAMES = {
     "notes": "เรื่องที่เขาเจอจริง ๆ ว่าเป็นยังไง (ที่มีอยู่ยังสั้นไป)",
@@ -62,9 +63,12 @@ RECORD_TOOL = {
                 "notes": {
                     "type": "string",
                     "description": (
-                        "สิ่งที่เขาเจอมาจริง ๆ ตามที่เล่า ใครเดือดร้อน ตอนไหน ยังไง "
-                        "ห้ามเขียนซ้ำกับ category เฉย ๆ เช่น 'น้ำท่วม' ใช้ไม่ได้ "
-                        "ถ้าเขายังไม่ได้เล่าอะไรเป็นเรื่องเป็นราว ห้ามส่งช่องนี้มา"
+                        "**ช่องหลัก ส่งมาทุกครั้งที่เขาเล่าอะไรก็ตาม** "
+                        "เล่าเรื่องของเขาให้ครบในช่องเดียวนี้ ใครเดือดร้อน ตอนไหน ยังไง "
+                        "ช่องอื่น (cause_said, affect_desc, occurred_said) เป็นการ"
+                        "**แยกชิ้นออกมาจากเรื่องนี้อีกที ไม่ใช่ตัวแทน** "
+                        "กรอกช่องอื่นแล้วเว้นช่องนี้ว่าง = เรื่องของเขาหายไปทั้งเรื่อง "
+                        "ห้ามเขียนซ้ำกับ category เฉย ๆ เช่น 'น้ำท่วม' ใช้ไม่ได้"
                     ),
                 },
                 "severity": {
@@ -216,6 +220,12 @@ SYSTEM_PROMPT = """คุณคือ "น้องเมือง" **ผู้�
 - ให้ขอบคุณสั้น ๆ แล้วชวนเล่าว่าในรูปคืออะไร ตรงไหน
 - **ห้ามทำเป็นว่าเห็นรูป ห้ามบรรยายว่าในรูปมีอะไร** เพราะคุณไม่เห็นจริง ๆ
 - ห้ามเอาสิ่งที่เดาจากรูปไปใส่ใน record_report
+- **ตอนขอรูป ขอครั้งเดียวพอ** บอกเหตุผลสั้น ๆ ว่ารูปช่วยให้ทีมออกแบบเห็นสภาพจริง
+  ของตรงนั้นได้ ซึ่งคำบรรยายบอกได้ไม่หมด
+- ชวนแบบสบาย ๆ ให้เขาปฏิเสธได้ง่าย เช่น "ถ้าสะดวกถ่ายรูปตรงนั้นมาให้ดูหน่อยได้ไหมคะ
+  ไม่มีก็ไม่เป็นไรนะคะ"
+- **ถ้าเขาบอกว่าไม่มี ไม่สะดวก หรือถ่ายไม่ได้ ปล่อยทันที ห้ามขอซ้ำ ห้ามคะยั้นคะยอ**
+  บางเรื่องเกิดไปแล้ว บางเรื่องเป็นตอนกลางคืน ถ่ายไม่ได้เป็นเรื่องปกติมาก
 
 เรื่องข้อมูลที่ระบบส่งมาให้ในวงเล็บ [ระบบ: ...]:
 - นั่นคือของจริงจากแอป ไม่ใช่คำพูดของชาวบ้าน เชื่อได้เลย
@@ -266,11 +276,18 @@ def has_location(report: dict) -> bool:
     return bool(report.get("location_text"))
 
 
+def has_image(report: dict) -> bool:
+    return bool(report.get("image_keys"))
+
+
 def next_goal(report: dict) -> str | None:
     """ยังต้องถามอะไรต่อ — คืน None แปลว่าพอแล้ว ปิดใบได้
 
     ตำแหน่งไม่ใช่ช่องบังคับ แต่ปลายทางคือหมุดบนแผนที่ เลยขอ MAX_LOCATION_ASKS หน
     ถ้าเขาไม่ให้จริง ๆ ก็ปล่อย ดีกว่าตื๊อจนเขาเลิกคุย
+
+    รูปขอทีหลังตำแหน่ง เพราะตำแหน่งมีค่ากว่า (ไม่มีพิกัด = ไม่ขึ้นหมุด)
+    ถ้ายิงขอพร้อมกันจะแย่งความสนใจกันเอง แล้วอาจไม่ได้สักอย่าง
     """
     left = missing(report)
     if left:
@@ -278,6 +295,9 @@ def next_goal(report: dict) -> str | None:
 
     if not has_location(report) and report.get("_location_asks", 0) < MAX_LOCATION_ASKS:
         return "location"
+
+    if not has_image(report) and report.get("_photo_asks", 0) < MAX_PHOTO_ASKS:
+        return "photo"
 
     return None
 
@@ -302,6 +322,12 @@ def _status(report: dict) -> str:
 
     if goal == "location":
         return "[ระบบ] เก็บลงระบบแล้ว ยังไม่มีตำแหน่ง — ขอตำแหน่งที่เกิดเรื่อง"
+
+    if goal == "photo":
+        return (
+            "[ระบบ] เก็บลงระบบแล้ว ยังไม่มีรูป — ชวนถ่ายรูปตรงนั้นมาให้ดูสักรูป "
+            "ขอครั้งเดียว บอกเหตุผลสั้น ๆ และทำให้ปฏิเสธง่าย"
+        )
 
     return f"[ระบบ] เก็บลงระบบแล้ว ยังขาด: {FIELD_NAMES[goal]} — ถามต่อเรื่องเดียว"
 
@@ -344,7 +370,7 @@ async def reply(
     if image_key:
         current = await draft.load(r, session_id)
         await draft.merge(
-            r, session_id, {"images": current.get("images", []) + [image_key]}
+            r, session_id, {"image_keys": current.get("image_keys", []) + [image_key]}
         )
 
     history = await memory.load(r, session_id)
@@ -403,12 +429,19 @@ async def reply(
 
     # ตัดสินด้วยค่า "ก่อนบวก" เสมอ — ตาที่เราเพิ่งถามหาตำแหน่ง ต้องปล่อยให้เขา
     # ได้ตอบก่อน 1 ตา ถ้าบวกแล้วเช็คทันทีจะกลายเป็นถามแล้วปิดใบในตาเดียวกัน
-    asking_location = next_goal(report) == "location"
+    goal = next_goal(report)
+    asking_location = goal == "location"
+    asking_photo = goal == "photo"
     done = is_complete(report)
 
     if asking_location:
         await draft.merge(
             r, session_id, {"_location_asks": report.get("_location_asks", 0) + 1}
+        )
+
+    if asking_photo:
+        await draft.merge(
+            r, session_id, {"_photo_asks": report.get("_photo_asks", 0) + 1}
         )
 
     report_id = None
@@ -434,9 +467,10 @@ async def reply(
         "reply": text,
         "report": _public(report),
         "report_id": report_id,
-        # บอกคนเรียกว่าตานี้เรากำลังขอตำแหน่งอยู่ ฝั่งแชทจะได้เอาไปขึ้นปุ่มให้กด
+        # บอกคนเรียกว่าตานี้เรากำลังขออะไรอยู่ ฝั่งแชทจะได้เอาไปขึ้นปุ่มให้กด
         # (ไฟล์นี้ไม่รู้ว่าปุ่มหน้าตายังไง และไม่ควรรู้)
         "asking_location": asking_location,
+        "asking_photo": asking_photo,
     }
 
 

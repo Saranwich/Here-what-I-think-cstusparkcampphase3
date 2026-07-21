@@ -11,6 +11,8 @@ from linebot.v3.messaging import (
     AsyncApiClient,
     AsyncMessagingApi,
     AsyncMessagingApiBlob,
+    CameraAction,
+    CameraRollAction,
     Configuration,
     LocationAction,
     PushMessageRequest,
@@ -27,42 +29,62 @@ log = logging.getLogger(__name__)
 
 configuration = Configuration(access_token=LINE_CHANNEL_ACCESS_TOKEN)
 
-# ปุ่มแชร์ตำแหน่ง โผล่ตอนบอทกำลังถามหาตำแหน่ง กดง่ายกว่าพิมพ์เยอะ
+# ปุ่มลัด โผล่เฉพาะตาที่บอทกำลังขอของนั้นอยู่ กดง่ายกว่าให้เขาหาเมนูเอง
 _LOCATION_BUTTON = QuickReply(
     items=[QuickReplyItem(action=LocationAction(label="ส่งตำแหน่ง"))]
 )
 
+# ให้ทั้งสองทาง — เรื่องที่เกิดอยู่ตอนนี้ถ่ายสด เรื่องเมื่อวานหยิบจากอัลบั้ม
+_PHOTO_BUTTONS = QuickReply(
+    items=[
+        QuickReplyItem(action=CameraAction(label="ถ่ายรูป")),
+        QuickReplyItem(action=CameraRollAction(label="เลือกจากอัลบั้ม")),
+    ]
+)
 
-def _message(text: str, ask_location: bool) -> TextMessage:
-    return TextMessage(
-        text=text,
-        quickReply=_LOCATION_BUTTON if ask_location else None,
-    )
+
+def _message(text: str, ask_location: bool, ask_photo: bool) -> TextMessage:
+    """ปุ่มขึ้นได้ชุดเดียว ตำแหน่งมาก่อนเสมอ — ไม่มีพิกัด = ไม่ขึ้นหมุดบนแผนที่"""
+    quick_reply = None
+    if ask_location:
+        quick_reply = _LOCATION_BUTTON
+    elif ask_photo:
+        quick_reply = _PHOTO_BUTTONS
+
+    return TextMessage(text=text, quickReply=quick_reply)
 
 
-async def reply(reply_token: str, text: str, ask_location: bool = False) -> None:
+async def reply(
+    reply_token: str, text: str, ask_location: bool = False, ask_photo: bool = False
+) -> None:
     async with AsyncApiClient(configuration) as api_client:
         await AsyncMessagingApi(api_client).reply_message(
             ReplyMessageRequest(
                 reply_token=reply_token,
-                messages=[_message(text, ask_location)],
+                messages=[_message(text, ask_location, ask_photo)],
             )
         )
 
 
-async def push(to: str, text: str, ask_location: bool = False) -> None:
+async def push(
+    to: str, text: str, ask_location: bool = False, ask_photo: bool = False
+) -> None:
     """ใช้ตอน reply token หมดอายุแล้ว — อันนี้กินโควตารายเดือนของ OA"""
     async with AsyncApiClient(configuration) as api_client:
         await AsyncMessagingApi(api_client).push_message(
             PushMessageRequest(
                 to=to,
-                messages=[_message(text, ask_location)],
+                messages=[_message(text, ask_location, ask_photo)],
             )
         )
 
 
 async def send(
-    reply_token: str, to: str, text: str, ask_location: bool = False
+    reply_token: str,
+    to: str,
+    text: str,
+    ask_location: bool = False,
+    ask_photo: bool = False,
 ) -> None:
     """ลอง reply ก่อนเพราะฟรี ไม่ได้ค่อย push
 
@@ -70,10 +92,10 @@ async def send(
     เลยดักตรงนี้แล้วเปลี่ยนไปใช้ push แทน ดีกว่าเงียบหายไปเฉย ๆ
     """
     try:
-        await reply(reply_token, text, ask_location)
+        await reply(reply_token, text, ask_location, ask_photo)
     except Exception:
         log.warning("reply ไม่สำเร็จ เปลี่ยนไปใช้ push", exc_info=True)
-        await push(to, text, ask_location)
+        await push(to, text, ask_location, ask_photo)
 
 
 async def download_image(message_id: str) -> bytes:
