@@ -22,6 +22,12 @@ from app.services import draft, memory
 CATEGORIES = ["heat", "flood", "access", "other"]
 SEVERITIES = ["low", "medium", "high"]
 
+# ผลกระทบต่อ "ชีวิตเขา" ไม่ใช่ "ปัญหาคืออะไร" — อย่างหลังคือ category
+# ถ้าปนกันเมื่อไหร่ tag จะกลายเป็นสำเนา category แล้วกรองอะไรไม่ได้เลย
+AFFECT_TAGS = ["health", "safety", "mobility", "property", "income", "daily_life"]
+FREQUENCIES = ["once", "occasional", "recurring"]
+TIMES_OF_DAY = ["morning", "afternoon", "evening", "night"]
+
 MIN_NOTES_CHARS = 20        # กัน AI เติม notes สั้น ๆ แล้วปิดเคสทั้งที่ยังไม่ได้อะไร
 MAX_LOCATION_ASKS = 2       # ขอพิกัด 2 หนแล้วพอ ไม่ตื๊อ
 
@@ -83,6 +89,62 @@ RECORD_TOOL = {
                         "ถ้าเขาไม่ได้พิมพ์บอกสถานที่ ห้ามส่งช่องนี้"
                     ),
                 },
+                "cause_said": {
+                    "type": "string",
+                    "description": (
+                        "สาเหตุตามที่ชาวบ้าน**คิดเองหรือบอกมาเอง** "
+                        "เช่น 'ท่อตัน' 'เขาถมถนนสูงกว่าบ้าน' 'คลองไม่ได้ขุดมาสิบปี' "
+                        "นี่คือความเชื่อของเขา ไม่ใช่ข้อเท็จจริงที่ตรวจแล้ว "
+                        "ห้ามเดาแทน ห้ามวิเคราะห์ให้ ถ้าเขาไม่ได้พูดถึงสาเหตุ ห้ามส่งช่องนี้"
+                    ),
+                },
+                "affect_desc": {
+                    "type": "string",
+                    "description": (
+                        "ผลกระทบตามคำของเขาเอง ให้ใกล้คำพูดเดิมที่สุด "
+                        "เช่น 'ต้องอุ้มลูกลุยน้ำไปส่งโรงเรียน' 'ไม่กล้าออกจากบ้านช่วงบ่าย' "
+                        "'ต้องเดินอ้อมไกลขึ้นสิบนาที'"
+                    ),
+                },
+                "affect_tags": {
+                    "type": "array",
+                    "items": {"type": "string", "enum": AFFECT_TAGS},
+                    "description": (
+                        "มันทำอะไรกับชีวิตเขา ติดได้หลายอัน "
+                        "health = สุขภาพ ป่วย เป็นลม ผื่น หายใจไม่ออก / "
+                        "safety = อันตราย ลื่นล้ม ไฟช็อต รถชน / "
+                        "mobility = ไปไหนลำบาก เดินอ้อม ออกจากบ้านไม่ได้ / "
+                        "property = ของเสียหาย บ้าน รถ ของที่ขาย / "
+                        "income = ขาดรายได้ ขายของไม่ได้ ไปทำงานสาย / "
+                        "daily_life = ใช้ชีวิตปกติไม่ได้ นอนไม่หลับ ทำกับข้าวไม่ได้ "
+                        "**ห้ามใส่ว่ามันเป็นปัญหาอะไร** อันนั้นคือ category คนละเรื่องกัน"
+                    ),
+                },
+                "occurred_said": {
+                    "type": "string",
+                    "description": (
+                        "เกิดตอนไหน ตามคำที่เขาพูด เช่น 'ทุกครั้งที่ฝนตก' "
+                        "'บ่ายสองทุกวัน' 'เมื่อวานตอนเย็น' "
+                        "**ห้ามแปลงเป็นวันที่หรือเวลาเป็นตัวเลข** เก็บคำเขาไว้ตรง ๆ"
+                    ),
+                },
+                "frequency": {
+                    "type": "string",
+                    "enum": FREQUENCIES,
+                    "description": (
+                        "เกิดบ่อยแค่ไหน — once = ครั้งเดียว เพิ่งเจอครั้งแรก / "
+                        "occasional = นาน ๆ ที / recurring = เกิดประจำ ซ้ำ ๆ"
+                    ),
+                },
+                "time_of_day": {
+                    "type": "array",
+                    "items": {"type": "string", "enum": TIMES_OF_DAY},
+                    "description": (
+                        "ช่วงเวลาที่เกิด ติดได้หลายช่วง "
+                        "morning = เช้า / afternoon = สาย-บ่าย / "
+                        "evening = เย็น / night = กลางคืน"
+                    ),
+                },
                 "use_last_location": {
                     "type": "boolean",
                     "description": (
@@ -130,6 +192,16 @@ SYSTEM_PROMPT = """คุณคือ "น้องเมือง" **ผู้�
 
 เรื่องความหนักเบา:
 - **ห้ามถามว่าหนักแค่ไหน หรือให้เขาให้คะแนน** คุณประเมินเองจากที่เขาเล่า
+
+เรื่องสาเหตุ ผลกระทบ และเวลาที่เกิด:
+- **ส่วนใหญ่เขาเล่ามาเองอยู่แล้ว หน้าที่คุณคือแกะออกมา ไม่ใช่ตั้งคำถามเพิ่ม**
+  เช่น "วันนี้ฝนตกแล้วน้ำท่วม ท่วมบ่อยเกือบตลอด ต้องอุ้มลูกลุยน้ำไปส่งโรงเรียน"
+  ประโยคเดียวนี้มีครบทั้งเวลา ความถี่ และผลกระทบ โดยไม่มีใครถามสักคำ
+- ถ้าเขาเล่ามาสั้นจนไม่มีอะไรให้แกะ **ถามเพิ่มได้แค่ 1 คำถามต่อ 1 เรื่อง**
+  เลือกถามอันที่ขาดแล้วน่าเสียดายที่สุดอันเดียว แล้วพอ
+- **ห้ามไล่ถามให้ครบทุกช่อง** นี่ไม่ใช่แบบสอบถาม ช่องไหนเขาไม่พูดถึงก็ปล่อยว่างไว้
+  ใบที่ข้อมูลไม่ครบแต่เขายังอยากคุย ดีกว่าใบที่ครบแต่เขาเลิกคุยไปกลางทาง
+- ห้ามเดาแทนเขาทุกกรณี ทุกช่องต้องมาจากสิ่งที่เขาพูดจริง ๆ
 
 เรื่องตำแหน่ง:
 - **ฟังให้รู้ก่อนว่าเขาเจอเรื่องอะไร แล้วค่อยขอตำแหน่ง**
@@ -310,7 +382,7 @@ async def reply(
             arguments = dict(call["arguments"])
             reuse = arguments.pop("use_last_location", False)
 
-            await draft.merge(r, session_id, _allowed(arguments, report))
+            await draft.merge(r, session_id, _allowed(_sanitize(arguments), report))
 
             if reuse and remembered:
                 # ตำแหน่งเก่าเป็นของจากปุ่มแชร์ เชื่อถือได้เท่าเดิม ล็อกไว้เหมือนกัน
@@ -366,6 +438,40 @@ async def reply(
         # (ไฟล์นี้ไม่รู้ว่าปุ่มหน้าตายังไง และไม่ควรรู้)
         "asking_location": asking_location,
     }
+
+
+# ช่องที่มีคำศัพท์ตายตัว — ค่านอกรายการถือว่าไม่มี
+_VOCAB = {
+    "category": CATEGORIES,
+    "severity": SEVERITIES,
+    "frequency": FREQUENCIES,
+}
+_LIST_VOCAB = {
+    "affect_tags": AFFECT_TAGS,
+    "time_of_day": TIMES_OF_DAY,
+}
+
+
+def _sanitize(arguments: dict) -> dict:
+    """เจอค่านอกรายการ ทิ้งเฉพาะค่านั้น ไม่ทิ้งทั้งใบ
+
+    วันหนึ่งโมเดลจะส่ง "urgent" มาแทน "high" แน่ ๆ ตอนนั้นเราต้องยังได้เรื่อง
+    ที่ชาวบ้านอุตส่าห์เล่ามาเก็บไว้ **ห้ามให้ค่าผิดช่องเดียวฆ่าทั้งรายงาน**
+    """
+    clean = {}
+
+    for field, value in arguments.items():
+        if field in _VOCAB:
+            if value in _VOCAB[field]:
+                clean[field] = value
+        elif field in _LIST_VOCAB:
+            kept = [v for v in value or [] if v in _LIST_VOCAB[field]]
+            if kept:
+                clean[field] = kept
+        else:
+            clean[field] = value
+
+    return clean
 
 
 def _allowed(arguments: dict, report: dict) -> dict:
