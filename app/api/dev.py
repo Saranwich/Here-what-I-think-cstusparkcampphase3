@@ -51,12 +51,30 @@ async def survey_test(
 
 @router.get("/survey/draft")
 async def survey_draft(session_id: str = "devtest", r: Redis = Depends(get_redis)):
-    """What has been collected so far, and what is still missing."""
-    report = await draft.load(r, session_id)
+    """What has been collected so far, and what is still missing.
+
+    One session can hold several reports at once, so "report"/"missing"/"next_goal"
+    describe the one the bot should be asking about right now.
+    """
+    reports = await draft.load_all(r, session_id)
+    spot = survey.focus(reports)
+    topic = spot[0] if spot else None
+    report = reports.get(topic, {})
+
     return {
+        "topic": topic,
         "report": report,
         "missing": survey.missing(report),
-        "next_goal": survey.next_goal(report),
+        "next_goal": spot[1] if spot else None,
+        "reports": {
+            name: {
+                "report": rep,
+                "missing": survey.missing(rep),
+                "next_goal": survey.next_goal(rep),
+            }
+            for name, rep in reports.items()
+        },
+        "ready": survey.ready(reports),
     }
 
 
