@@ -111,6 +111,22 @@ async def list_reports(pool: asyncpg.Pool) -> list[dict]:
     return [dict(row) | {"images": json.loads(row["images"])} for row in rows]
 
 
+async def add_image(pool: asyncpg.Pool, report_id: int, image_key: str) -> bool:
+    """แนบรูปเข้าใบที่ปิดไปแล้ว คืน False ถ้าไม่มีใบนั้น
+
+    descr เอาจาก title ของใบนั้นเลย เพราะรูปที่ตามมาทีหลังคือรูปของเรื่องนั้น
+    """
+    done = await pool.execute(
+        """
+        INSERT INTO report_images (report_id, image_key, descr)
+        SELECT id, $2, title FROM reports WHERE id = $1
+        """,
+        report_id,
+        image_key,
+    )
+    return done != "INSERT 0 0"
+
+
 async def image_key(pool: asyncpg.Pool, image_id: int) -> str | None:
     """key ของรูปใบนั้น คืน None ถ้าไม่มีรูปนี้อยู่"""
     return await pool.fetchval(

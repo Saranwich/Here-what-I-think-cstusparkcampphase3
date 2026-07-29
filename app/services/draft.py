@@ -116,5 +116,11 @@ async def just_finished(r: Redis, session_id: str) -> bool:
     return await r.exists(_done_key(session_id)) == 1
 
 
+async def finished_id(r: Redis, session_id: str) -> int | None:
+    """เลขใบที่เพิ่งปิดไป คืน None ถ้าไม่มี — ของที่ตามมาทีหลังจะได้ตามไปเกาะถูกใบ"""
+    value = await r.get(_done_key(session_id))
+    return int(value) if value is not None else None
+
+
 async def clear_done(r: Redis, session_id: str) -> None:
     await r.delete(_done_key(session_id))

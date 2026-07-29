@@ -623,6 +623,9 @@ def _status(reports: dict) -> str:
 
 MAX_TOOL_ROUNDS = 3   # กันโมเดลวนเรียก tool ไม่หยุด
 
+# รูปที่ตามมาหลังปิดใบ — ตอบเองไม่ต้องผ่านโมเดล ดูเหตุผลตรงที่ใช้
+PHOTO_ADDED = "ได้รูปเพิ่มแล้วค่ะ แนบไปกับเรื่องเมื่อกี้ให้เรียบร้อยแล้วนะคะ 🙏"
+
 
 async def reply(
     r: Redis,
@@ -684,6 +687,28 @@ async def _turn(
                 "_location_locked": True,
             },
         )
+
+    if image_key and not reports:
+        # ปิดใบไปแล้วแต่รูปยังตามมาอีก — คนส่งรูปรวดหลายใบ ใบแรกปิดเรื่องไปเรียบร้อย
+        # ที่เหลือจึงมาถึงตอนไม่มีใบเปิดค้างอยู่แล้ว **มันเป็นรูปของเรื่องเมื่อกี้**
+        #
+        # ห้ามถามโมเดลตรงนี้เด็ดขาด รูปไม่เข้าโมเดล สิ่งเดียวที่มันเห็นคือคำว่า
+        # "ส่งรูปมาให้" แล้วมันจะปั้นเรื่องใหม่ขึ้นมาจากคำนั้น — เกิดขึ้นแล้วจริง
+        # ได้ใบที่ notes เขียนว่า "แดดร้อน ส่งรูปมาให้ดูด้วย" ทั้งที่ไม่มีใครพูดแบบนั้น
+        #
+        # ไม่เรียกโมเดลยังเร็วกว่าด้วย รูปใบที่สองสามตอบกลับได้ทันที ไม่ต้องรอคิว
+        finished = await draft.finished_id(r, session_id)
+        if finished is not None and await storage.add_image(pool, finished, image_key):
+            return {
+                "reply": PHOTO_ADDED,
+                "report": {},
+                "report_id": finished,
+                "report_ids": [],
+                "reports": {},
+                "asking_location": False,
+                "asking_photo": False,
+                "store_broke": False,
+            }
 
     if image_key:
         topic = current_topic(reports)
