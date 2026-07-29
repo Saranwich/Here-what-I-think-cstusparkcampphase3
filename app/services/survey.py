@@ -13,6 +13,7 @@
 """
 
 import logging
+import re
 
 import asyncpg
 from redis.asyncio import Redis
@@ -546,22 +547,38 @@ def is_complete(report: dict) -> bool:
 _GOAL_URGENCY = {"location": 1, "impact": 2, "photo": 3}
 
 
-def _needs_pin(reports: dict, just_closed: bool) -> bool:
+def _needs_pin(reports: dict, text: str) -> bool:
     """ควรโชว์ปุ่มส่งตำแหน่งไหม
 
-    เดิมโชว์เฉพาะตาที่โค้ดกำลังโฟกัสเรื่องตำแหน่งพอดี แต่โมเดลพูดถึงปุ่มได้ทุกเมื่อ
-    เคยเจอ: โมเดลบอก "กดปุ่มข้างล่างได้เลยค่ะ" แล้วชาวบ้านตอบกลับมาว่า
-    **"ปุ่มไม่ขึ้นอ่ะน้อง"** เพราะตอนนั้นใบเพิ่งปิดไป โค้ดเลยไม่ได้ส่งปุ่มไปด้วย
+    สองทางที่ปุ่มควรขึ้น และไม่มีทางที่สาม:
+    1. มีใบค้างที่ยังไม่มีพิกัดและเขายังไม่ได้ปฏิเสธ — คำขอยังมีผลอยู่จริง
+       ไม่ดูข้อความตานี้เลย เพราะโมเดลพูดคนละภาษากับเราได้ และคำขอไม่ได้หายไปไหน
+    2. ไม่มีใบค้าง แต่**ข้อความตานี้ชวนให้กดปุ่มเอง** เช่นตาที่เพิ่งปิดใบไป
+       แล้วโมเดลชวนต่อว่ามีเรื่องอื่นอีกไหม กดส่งตำแหน่งได้เลย
 
-    **ปุ่มที่ขึ้นเกินไม่มีใครเดือดร้อน ปุ่มที่ควรขึ้นแล้วไม่ขึ้นทำให้คนแก่ไปต่อไม่ได้**
+    เดิมข้อ 2 เป็น "เพิ่งปิดใบ = ส่งปุ่มไปด้วย" โดยไม่ดูว่าตานั้นพูดถึงปุ่มหรือเปล่า
+    ผลคือครึ่งชั่วโมงหลังปิดใบ พิมพ์ "ครับ" คำเดียวก็ยังมีปุ่มโผล่มาข้างล่าง
+    เหมือนบอทกำลังจะขออะไรต่อทั้งที่คุยจบไปแล้ว — **ปุ่มที่ขึ้นเกินไม่ใช่ของฟรี**
+    มันบอกคนแก่ว่ายังมีอะไรให้ต้องกดอีก
     """
     if not reports:
-        # ปิดใบไปหมาด ๆ เขาอาจกำลังจะเล่าเรื่องต่อไปและอยากส่งตำแหน่งก่อนเล่า
-        return just_closed
+        return _invites_pin(text)
 
     return any(
         rep.get("latitude") is None and not rep.get("no_location")
         for rep in reports.values()
+    )
+
+
+# ต้องเจอทั้งสองฝั่งถึงนับว่าชวนกดปุ่ม — "ขอบคุณที่ส่งตำแหน่งมานะคะ" มีคำว่าตำแหน่ง
+# แต่เป็นคำขอบคุณ ไม่ใช่คำขอ ส่วนคำชวนจริงต้องบอกว่ามีปุ่มให้กด (กฎในพรอมป์ทบังคับไว้)
+_PIN_WORDS = ("ตำแหน่ง", "พิกัด", "ปักหมุด", "location")
+_BUTTON_WORDS = ("ปุ่ม", "กด", "button", "tap")
+
+
+def _invites_pin(text: str) -> bool:
+    return any(word in text for word in _PIN_WORDS) and any(
+        word in text for word in _BUTTON_WORDS
     )
 
 
@@ -942,7 +959,7 @@ async def _turn(
 
     spot = focus(reports)
     asking_photo = spot is not None and spot[1] == "photo"
-    asking_location = not asking_photo and _needs_pin(reports, just_closed)
+    asking_location = not asking_photo and _needs_pin(reports, text)
 
     # ใบที่ครบแล้วย้ายไปที่เก็บถาวร ทีละใบ หนึ่งตาปิดได้มากกว่าหนึ่งใบ
     closed = []
@@ -1023,6 +1040,26 @@ _LIST_VOCAB = {
 }
 
 
+# หางที่โมเดลชอบต่อท้าย notes หลังตาที่มีรูปส่งมา — "… ส่งรูปมาให้ดู 2 รูป"
+# มันถอดความมาจาก marker [ระบบ: ผู้ใช้ส่งรูปมาให้ 2 รูป …] ซึ่งเป็นเสียงของระบบ
+# ไม่ใช่คำที่ใครพูด กฎห้ามลอกในพรอมป์ทจับได้แค่ตัวอักษรตรง ๆ ไม่ได้จับการเรียบเรียงใหม่
+# ปล่อยไว้ทีมออกแบบจะอ่านเจอประโยคที่ไม่มีใครพูดติดท้ายทุกใบที่มีรูป
+_PHOTO_ECHO = re.compile(
+    r"[\s,]*(?:และ|แล้ว)?\s*(?:ได้)?(?:ส่ง|แนบ|ถ่าย)(?:รูป|ภาพ)"
+    r"[^\n]{0,15}?\d+\s*(?:รูป|ภาพ)[^\n]{0,15}$"
+)
+
+
+def _drop_photo_echo(notes: str) -> str:
+    """ตัดหางที่มาจาก marker ออกจากเรื่องเล่า
+
+    **ตัดสั้นกว่าครึ่ง = จับผิดตัว** คืนของเดิมไป เรื่องที่เขาอุตส่าห์เล่ามา
+    สำคัญกว่าประโยคเกินหนึ่งประโยค ตัวกรองนี้ห้ามเป็นเหตุให้ใครเสียเรื่องของตัวเอง
+    """
+    trimmed = _PHOTO_ECHO.sub("", notes).strip(" ,")
+    return trimmed if len(trimmed) * 2 >= len(notes) else notes
+
+
 def _sanitize(arguments: dict) -> dict:
     """เจอค่านอกรายการ ทิ้งเฉพาะค่านั้น ไม่ทิ้งทั้งใบ
 
@@ -1032,7 +1069,9 @@ def _sanitize(arguments: dict) -> dict:
     clean = {}
 
     for field, value in arguments.items():
-        if field in _VOCAB:
+        if field == "notes" and value:
+            clean[field] = _drop_photo_echo(str(value))
+        elif field in _VOCAB:
             if value in _VOCAB[field]:
                 clean[field] = value
         elif field in _LIST_VOCAB:
