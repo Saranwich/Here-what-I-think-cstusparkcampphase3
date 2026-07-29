@@ -109,7 +109,12 @@ RECORD_TOOL = {
                 },
                 "title": {
                     "type": "string",
-                    "description": "พาดหัวสั้น ๆ ไม่เกิน 10 คำ ไว้ขึ้นบนหมุดแผนที่",
+                    "description": (
+                        "พาดหัวสั้น ๆ ไม่เกิน 10 คำ ไว้ขึ้นบนหมุดแผนที่ "
+                        "**ส่งมาทันทีที่ notes พอจะสรุปได้ ไม่ต้องรอให้ครบทุกช่อง** "
+                        "ต้องบอกได้ว่าเรื่องอะไรและที่ไหน เช่น 'น้ำท่วมหน้าทางเข้าหอพัก' "
+                        "**ห้ามถามชาวบ้านว่าจะตั้งชื่อเรื่องว่าอะไร** อันนี้คุณเขียนเอง"
+                    ),
                 },
                 "location_text": {
                     "type": "string",
@@ -1150,9 +1155,40 @@ def _allowed(arguments: dict, report: dict) -> dict:
     return {k: v for k, v in arguments.items() if k != "location_text"}
 
 
+HEADLINE_CHARS = 40
+
+
+def _headline(notes: str) -> str:
+    """พาดหัวจากเรื่องที่เขาเล่า — ถอยมาจบที่ช่องว่าง ไม่ตัดคาคำ
+
+    ไทยเขียนติดกันยาว ๆ ช่องว่างมาห่างกันมาก การยอมสั้นลงเยอะเพื่อให้จบคำ
+    จึงคุ้มกว่าที่คิด **ตัดคาคำแย่กว่าตัดสั้น** เว้นแต่สั้นจนไม่เหลือความหมาย
+    (ต่ำกว่าหนึ่งในสามของโควตา) อันนั้นตัดตรง ๆ ดีกว่า
+    """
+    text = " ".join(notes.split())
+    if len(text) <= HEADLINE_CHARS:
+        return text
+
+    cut = text[:HEADLINE_CHARS]
+    space = cut.rfind(" ")
+    return cut[:space] if space > HEADLINE_CHARS // 3 else cut
+
+
 def public(report: dict) -> dict:
-    """ตัดช่องที่เราใช้นับภายในออก ขึ้นต้นด้วย _ = ไม่ลง DB ไม่โผล่ออก API"""
-    return {k: v for k, v in report.items() if not k.startswith("_")}
+    """ตัดช่องที่เราใช้นับภายในออก ขึ้นต้นด้วย _ = ไม่ลง DB ไม่โผล่ออก API
+
+    เป็นคอขวดเดียวก่อนลงที่เก็บถาวร ทั้งทางปิดใบปกติและทางที่ sweeper เก็บให้
+    จึงเป็นที่ที่เติม `title` ให้เอง — โมเดลมักลืมช่องนี้ แล้วของที่ตามมาทีหลัง
+    พังต่อกันเป็นทอด: แดชบอร์ดขึ้นเรื่องเล่าท่อนกลางแทนพาดหัว และรูปที่ส่งตามมา
+    หลังปิดใบได้คำบรรยายเป็น null เพราะ `clients/storage.add_image` ใช้ title
+    เป็นคำบรรยาย **พาดหัวเป็นของที่เราเขียนให้คนอ่าน ไม่ใช่ของที่ต้องไปถามเจ้าของเรื่อง**
+    """
+    clean = {k: v for k, v in report.items() if not k.startswith("_")}
+
+    if not clean.get("title") and clean.get("notes"):
+        clean["title"] = _headline(str(clean["notes"]))
+
+    return clean
 
 
 def _with_markers(message: str, latitude, longitude, photos: int) -> str:
