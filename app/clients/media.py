@@ -13,15 +13,20 @@ from datetime import datetime, timezone
 
 from app.core.config import BASE_DIR
 
-IMAGE_DIR = BASE_DIR / "local" / "images"
+STORE_DIR = BASE_DIR / "local"
 
 
 async def save(message_id: str, content: bytes) -> str:
-    """เก็บรูป 1 ใบ คืน key ที่เก็บไว้ (ทีหลังจะเป็น S3 key)"""
+    """เก็บรูป 1 ใบ คืน key ที่เก็บไว้ (ทีหลังจะเป็น S3 key)
+
+    key ต่อท้าย STORE_DIR แล้วได้ path ของไฟล์เลย ไม่มีกฎแปลงชื่ออะไรคั่นกลาง
+    ที่ต้องเป็นแบบนี้เพราะสิ่งที่ลง DB คือ key ล้วน ๆ วันเปิดแดชบอร์ดต้องหาไฟล์
+    เจอจาก key อย่างเดียว
+    """
     now = datetime.now(timezone.utc)
     key = f"images/{now:%Y/%m}/{message_id}.jpg"
 
-    path = IMAGE_DIR / f"{now:%Y-%m}" / f"{message_id}.jpg"
+    path = STORE_DIR / key
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(content)
 
