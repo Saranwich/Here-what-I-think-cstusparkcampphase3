@@ -42,11 +42,13 @@ _HANDLED = {"latitude", "longitude", "images"}
 
 _SELECT = ", ".join(("r.id", *(f"r.{name}" for name in COLUMNS), "r.created_at"))
 
-# คืนรูปในทรงเดียวกับตอนเขียนเข้าไป — [{"key": ..., "descr": ...}]
+# id ติดมาด้วยเพราะเป็นตัวที่ใช้ขอไฟล์รูป — คนอ่านไม่ต้องรู้จัก key เลยก็ได้
 _IMAGES = """
     COALESCE(
-        json_agg(json_build_object('key', i.image_key, 'descr', i.descr) ORDER BY i.id)
-            FILTER (WHERE i.id IS NOT NULL),
+        json_agg(
+            json_build_object('id', i.id, 'key', i.image_key, 'descr', i.descr)
+            ORDER BY i.id
+        ) FILTER (WHERE i.id IS NOT NULL),
         '[]'
     ) AS images
 """
@@ -107,6 +109,13 @@ async def list_reports(pool: asyncpg.Pool) -> list[dict]:
     """)
     # json_agg คืนมาเป็นข้อความ asyncpg ไม่แกะให้เอง
     return [dict(row) | {"images": json.loads(row["images"])} for row in rows]
+
+
+async def image_key(pool: asyncpg.Pool, image_id: int) -> str | None:
+    """key ของรูปใบนั้น คืน None ถ้าไม่มีรูปนี้อยู่"""
+    return await pool.fetchval(
+        "SELECT image_key FROM report_images WHERE id = $1", image_id
+    )
 
 
 async def last_location(pool: asyncpg.Pool, session_id: str) -> dict | None:

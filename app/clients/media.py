@@ -10,6 +10,7 @@
 """
 
 from datetime import datetime, timezone
+from pathlib import Path
 
 from app.core.config import BASE_DIR
 
@@ -31,3 +32,17 @@ async def save(message_id: str, content: bytes) -> str:
     path.write_bytes(content)
 
     return key
+
+
+def local_file(key: str) -> Path | None:
+    """key -> ไฟล์บนเครื่อง คืน None ถ้าไม่มีไฟล์นั้น
+
+    **ที่เดียวในโปรเจกต์ที่แปลง key เป็น path ได้** วันย้ายขึ้น S3 ฟังก์ชันนี้
+    จะกลายเป็นตัวดึงจาก bucket แทน คนเรียกไม่ต้องรู้ว่าไฟล์ไปนอนอยู่ที่ไหนแล้ว
+    """
+    path = (STORE_DIR / key).resolve()
+    if not path.is_relative_to(STORE_DIR.resolve()):
+        # key มาจากฐานข้อมูลของเราเอง ไม่ควรมีทางหลุดออกนอกโฟลเดอร์
+        # แต่ตรงนี้เป็นทางที่ยิงไฟล์ออกไปข้างนอก ไม่ควรเชื่อใครทั้งนั้น
+        return None
+    return path if path.is_file() else None
