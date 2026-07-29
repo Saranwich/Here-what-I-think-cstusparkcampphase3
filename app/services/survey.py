@@ -402,8 +402,13 @@ JUST_FINISHED_NOTE = """
 LAST_LOCATION_NOTE = """
 
 **คนนี้เคยแชร์ตำแหน่งไว้แล้ว: {where}**
-**ถ้าบรรทัดบนไม่ได้บอกชื่อสถานที่จริง ๆ แปลว่าคุณเรียกชื่อที่นั่นไม่ได้
-ห้ามชวนว่า "ที่เดิมไหม" เด็ดขาด** เพราะเขาไม่มีทางรู้ว่าคุณหมายถึงตรงไหน
+บรรทัดบนมาจากแอปแผนที่ ส่วนใหญ่เป็นที่อยู่ไปรษณีย์เต็มยศหรือรหัสอย่าง `3HHW+2G9`
+**ให้หยิบมาแค่ท่อนที่คนแถวนั้นเรียกกันจริง** เช่นชื่อซอย ชื่อตลาด ชื่ออาคาร
+แล้วพูดแค่ท่อนนั้น เช่น "แถวสวนวิทยาศาสตร์ที่เคยบอกไว้ใช่ไหมคะ"
+**ห้ามอ่านที่อยู่ยาว ๆ หรือรหัสออกมาทั้งดุ้น** ไม่มีใครพูดกันแบบนั้น
+**ถ้าหยิบท่อนแบบนั้นไม่ได้เลย ให้ถามตำแหน่งตามปกติไปเลย
+ห้ามพูดลอย ๆ ว่า "ที่เดิม" หรือ "ที่เคยแชร์ไว้ก่อนหน้า" เด็ดขาด**
+เพราะเขาไม่มีทางรู้ว่าคุณหมายถึงตรงไหน
 เขาแค่กดปุ่มส่งพิกัด ไม่เคยพิมพ์ชื่อที่นั้นออกมา และอาจผ่านมาหลายวันแล้ว
 การทวงถึงที่ที่เรียกชื่อไม่ได้ทำให้เหมือนเรามีแฟ้มประวัติเขาอยู่ — ให้ถามตำแหน่งตามปกติแทน
 ตอนถามหาตำแหน่ง ให้ถามว่าเป็นที่เดิมหรือคนละที่ อย่าให้เขาแชร์ซ้ำโดยไม่จำเป็น
@@ -708,9 +713,9 @@ async def reply(
     closed = []
     for topic in ready(reports):
         report_id = await storage.save_report(
-            {"session_id": session_id, "source": source, **_public(reports[topic])}
+            {"session_id": session_id, "source": source, **public(reports[topic])}
         )
-        closed.append((topic, report_id, _public(reports[topic])))
+        closed.append((topic, report_id, public(reports[topic])))
         await draft.remove(r, session_id, topic)
 
     reports = await draft.load_all(r, session_id)
@@ -737,10 +742,10 @@ async def reply(
     return {
         "reply": text,
         # ใบที่เพิ่งปิดสำคัญกว่าใบที่ยังค้าง คนเรียกอยากรู้ผลของตานี้
-        "report": closed[0][2] if closed else _public(reports.get(spot[0], {}) if spot else {}),
+        "report": closed[0][2] if closed else public(reports.get(spot[0], {}) if spot else {}),
         "report_id": closed[0][1] if closed else None,
         "report_ids": [report_id for _, report_id, _ in closed],
-        "reports": {topic: _public(rep) for topic, rep in reports.items()},
+        "reports": {topic: public(rep) for topic, rep in reports.items()},
         # บอกคนเรียกว่าตานี้เรากำลังขออะไรอยู่ ฝั่งแชทจะได้เอาไปขึ้นปุ่มให้กด
         # (ไฟล์นี้ไม่รู้ว่าปุ่มหน้าตายังไง และไม่ควรรู้)
         "asking_location": asking_location,
@@ -815,7 +820,7 @@ def _allowed(arguments: dict, report: dict) -> dict:
     return {k: v for k, v in arguments.items() if k != "location_text"}
 
 
-def _public(report: dict) -> dict:
+def public(report: dict) -> dict:
     """ตัดช่องที่เราใช้นับภายในออก ขึ้นต้นด้วย _ = ไม่ลง DB ไม่โผล่ออก API"""
     return {k: v for k, v in report.items() if not k.startswith("_")}
 

@@ -90,11 +90,19 @@ async def send(
 
     reply พังได้หลายทาง (token หมดอายุ / ถูกใช้ไปแล้ว) ซึ่งเรารู้ตอนยิงเท่านั้น
     เลยดักตรงนี้แล้วเปลี่ยนไปใช้ push แทน ดีกว่าเงียบหายไปเฉย ๆ
+
+    **push นับเข้าโควตาข้อความรายเดือน ส่วน reply ไม่นับ** โควตาก้อนเดียวกันนี้
+    คือก้อนที่ broadcast จะใช้ ตกมา push บ่อยเมื่อไหร่แปลว่าเรากินโควตาของ
+    broadcast ไปเรื่อย ๆ โดยไม่มีใครเห็น — log บรรทัดนี้คือที่เดียวที่บอกได้
     """
     try:
         await reply(reply_token, text, ask_location, ask_photo)
     except Exception:
-        log.warning("reply ไม่สำเร็จ เปลี่ยนไปใช้ push", exc_info=True)
+        log.warning(
+            "reply ไม่สำเร็จ ตกไปใช้ push แทน (กินโควตารายเดือนก้อนเดียวกับ broadcast) to=%s",
+            to,
+            exc_info=True,
+        )
         await push(to, text, ask_location, ask_photo)
 
 

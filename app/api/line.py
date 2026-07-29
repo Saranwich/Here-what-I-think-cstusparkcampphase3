@@ -8,6 +8,8 @@ AI คิดนานกว่านั้นแน่ เลยตอบ 200 �
 สมองข้างในรับแค่ str กับตัวเลข
 """
 
+import logging
+
 from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Request
 from linebot.v3 import WebhookParser
 from linebot.v3.exceptions import InvalidSignatureError
@@ -25,9 +27,18 @@ from app.clients import media
 from app.core.config import LINE_CHANNEL_SECRET
 from app.services import survey
 
+log = logging.getLogger(__name__)
+
 router = APIRouter()
 
 parser = WebhookParser(LINE_CHANNEL_SECRET)
+
+# ข้อความตอนระบบเราเองมีปัญหา — พูดเหมือนน้องเมืองพูด ไม่ใช่หน้าจอ error
+# ห้ามบอกว่าเก็บเรื่องให้แล้ว เพราะตอนนี้เราไม่รู้เลยว่าเก็บทันหรือเปล่า
+TROUBLE = (
+    "ขอโทษนะคะ ตอนนี้ระบบทางนี้ขัดข้องอยู่ "
+    "รบกวนพิมพ์มาใหม่อีกทีในอีกสักพักได้ไหมคะ 🙏"
+)
 
 
 def session_id(event: MessageEvent) -> str:
@@ -118,21 +129,29 @@ async def answer(
     if direct:
         await line_client.show_loading(session)
 
-    image_key = None
-    if image_id := incoming.get("image_id"):
-        # LINE เก็บรูปให้ชั่วคราว ต้องรีบมาเอาก่อนหมดอายุ
-        content = await line_client.download_image(image_id)
-        image_key = await media.save(image_id, content)
+    try:
+        image_key = None
+        if image_id := incoming.get("image_id"):
+            # LINE เก็บรูปให้ชั่วคราว ต้องรีบมาเอาก่อนหมดอายุ
+            content = await line_client.download_image(image_id)
+            image_key = await media.save(image_id, content)
 
-    result = await survey.reply(
-        r,
-        session,
-        incoming["said"],
-        latitude=incoming.get("latitude"),
-        longitude=incoming.get("longitude"),
-        location_text=incoming.get("location_text"),
-        image_key=image_key,
-    )
+        result = await survey.reply(
+            r,
+            session,
+            incoming["said"],
+            latitude=incoming.get("latitude"),
+            longitude=incoming.get("longitude"),
+            location_text=incoming.get("location_text"),
+            image_key=image_key,
+        )
+    except Exception:
+        # Redis ล่ม AI ไม่ตอบ ดิสก์เต็ม — อะไรก็ตามที่เราไม่ได้เตรียมไว้
+        # ตรงนี้ทำงานหลังตอบ 200 ไปแล้ว ถ้าปล่อยให้ตายเงียบ **ชาวบ้านจะเห็นแค่ความเงียบ**
+        # แล้วไม่มีทางรู้เลยว่าที่พิมพ์ไปถึงหรือไม่ถึง บอกไปตรง ๆ ดีกว่า
+        log.exception("ตอบไม่สำเร็จ session=%s", session)
+        await line_client.send(reply_token, session, TROUBLE)
+        return
 
     await line_client.send(
         reply_token,
