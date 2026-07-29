@@ -20,7 +20,7 @@ import asyncpg
 from redis.asyncio import Redis
 
 from app.clients import storage
-from app.services import draft, survey
+from app.services import draft, lock, survey
 
 log = logging.getLogger(__name__)
 
@@ -49,27 +49,41 @@ async def rescue(r: Redis, pool: asyncpg.Pool) -> int:
         if ttl < 0 or ttl > RESCUE_UNDER:
             continue
 
-        for topic, report in (await draft.load_all(r, session_id)).items():
-            if survey.missing(report):
-                # ยังไม่มีเนื้อเรื่อง เก็บไปก็ไม่มีอะไรให้อ่าน ปล่อยหมดอายุไป
-                continue
+        try:
+            # เขากำลังพิมพ์อยู่พอดี ปล่อยให้ตาของเขาจัดการไป เดี๋ยวรอบหน้าค่อยมาใหม่
+            # ถ้าแย่งกันเก็บจะได้เรื่องเดียวกันสองใบ (ดู services/lock.py)
+            async with lock.one_at_a_time(r, session_id, wait=0):
+                saved += await _rescue_session(r, pool, session_id)
+        except lock.Busy:
+            continue
 
-            report_id = await storage.save_report(
-                pool,
-                {
-                    "session_id": session_id,
-                    "source": "rescued",
-                    **survey.public(report),
-                },
-            )
-            await draft.remove(r, session_id, topic)
-            saved += 1
-            log.warning(
-                "เก็บใบที่ใกล้หมดอายุไว้ทัน id=%s session=%s ขาด=%s",
-                report_id,
-                session_id,
-                survey.next_goal(report),
-            )
+    return saved
+
+
+async def _rescue_session(r: Redis, pool: asyncpg.Pool, session_id: str) -> int:
+    saved = 0
+
+    for topic, report in (await draft.load_all(r, session_id)).items():
+        if survey.missing(report):
+            # ยังไม่มีเนื้อเรื่อง เก็บไปก็ไม่มีอะไรให้อ่าน ปล่อยหมดอายุไป
+            continue
+
+        report_id = await storage.save_report(
+            pool,
+            {
+                "session_id": session_id,
+                "source": "rescued",
+                **survey.public(report),
+            },
+        )
+        await draft.remove(r, session_id, topic)
+        saved += 1
+        log.warning(
+            "เก็บใบที่ใกล้หมดอายุไว้ทัน id=%s session=%s ขาด=%s",
+            report_id,
+            session_id,
+            survey.next_goal(report),
+        )
 
     return saved
 

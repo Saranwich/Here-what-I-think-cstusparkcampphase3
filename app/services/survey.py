@@ -18,7 +18,7 @@ import asyncpg
 from redis.asyncio import Redis
 
 from app.clients import llm, storage, transcript
-from app.services import draft, memory
+from app.services import draft, lock, memory
 
 log = logging.getLogger(__name__)
 
@@ -625,6 +625,32 @@ MAX_TOOL_ROUNDS = 3   # กันโมเดลวนเรียก tool ไ�
 
 
 async def reply(
+    r: Redis,
+    pool: asyncpg.Pool,
+    session_id: str,
+    message: str,
+    latitude: float | None = None,
+    longitude: float | None = None,
+    location_text: str | None = None,
+    image_key: str | None = None,
+    source: str = "user",
+) -> dict:
+    """หนึ่งตาของบทสนทนา — ตาของคนเดียวกันห้ามวิ่งพร้อมกัน ดู services/lock.py"""
+    async with lock.one_at_a_time(r, session_id):
+        return await _turn(
+            r,
+            pool,
+            session_id,
+            message,
+            latitude,
+            longitude,
+            location_text,
+            image_key,
+            source,
+        )
+
+
+async def _turn(
     r: Redis,
     pool: asyncpg.Pool,
     session_id: str,
