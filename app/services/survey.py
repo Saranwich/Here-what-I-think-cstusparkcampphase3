@@ -12,11 +12,15 @@
 (แม้แต่ในคอมเมนต์ก็เลี่ยงคำต้องห้าม เพราะ grep ในกฎข้อ 2 จับคำ ไม่ได้จับความหมาย)
 """
 
+import logging
+
 import asyncpg
 from redis.asyncio import Redis
 
 from app.clients import llm, storage, transcript
 from app.services import draft, memory
+
+log = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------- ช่องที่เก็บ
 
@@ -448,7 +452,36 @@ def has_location(report: dict) -> bool:
 
 
 def has_image(report: dict) -> bool:
-    return bool(report.get("image_keys"))
+    return bool(report.get("images"))
+
+
+async def _remembered_place(pool: asyncpg.Pool, session_id: str) -> dict | None:
+    """ตำแหน่งที่เคยแจ้งไว้ — ที่เก็บล่มก็ไม่เป็นไร ถามเขาใหม่เอา
+
+    อันนี้เป็นของอำนวยความสะดวก ไม่ใช่ของจำเป็น ถ้าปล่อยให้มันล้มทั้งตา
+    ที่เก็บล่มทีเดียวบอทจะคุยไม่ได้เลย ทั้งที่เรื่องที่ค้างอยู่ยังไม่ได้หายไปไหน
+    """
+    try:
+        return await storage.last_location(pool, session_id)
+    except Exception:
+        log.warning("อ่านตำแหน่งเก่าไม่ได้ ถามใหม่แทน session=%s", session_id, exc_info=True)
+        return None
+
+
+def _image_descr(report: dict) -> str | None:
+    """เรื่องที่คุยกันค้างอยู่ตอนรูปมาถึง
+
+    รูปที่ส่งมาทางแชทไม่มีข้อความติดมาด้วยเลย และ **รูปไม่เข้าโมเดล** มันจึงบรรยาย
+    ให้ไม่ได้ ที่ทำได้คือจดว่าตอนนั้นกำลังคุยเรื่องอะไรกันอยู่ ไม่ตรงประเด็นก็ยังดีกว่า
+    ให้ทีมเปิดดูรูปทีหลังแล้วเดาเอาเองว่ารูปนี้มาจากไหน
+
+    ยังไม่มีเรื่องเลย (ส่งรูปมาก่อนเล่า) ก็คืน None ไป ตอนนั้นยังไม่มีอะไรให้จดจริง ๆ
+    """
+    if report.get("title"):
+        return report["title"]
+    if report.get("notes"):
+        return report["notes"][:200]
+    return None
 
 
 def next_goal(report: dict) -> str | None:
@@ -633,7 +666,10 @@ async def reply(
             r,
             session_id,
             topic,
-            {"image_keys": current.get("image_keys", []) + [image_key]},
+            {
+                "images": current.get("images", [])
+                + [{"key": image_key, "descr": _image_descr(current)}]
+            },
         )
 
     history = await memory.load(r, session_id)
@@ -646,7 +682,7 @@ async def reply(
 
     # เคยแจ้งตำแหน่งไว้ในใบก่อน ๆ มั้ย — ถามจากที่เก็บหลัก ไม่ได้กองไว้ใน Redis
     known = any(has_location(rep) for rep in reports.values())
-    remembered = None if known else await storage.last_location(pool, session_id)
+    remembered = None if known else await _remembered_place(pool, session_id)
     if remembered:
         prompt += LAST_LOCATION_NOTE.format(
             where=remembered.get("location_text") or "ตำแหน่งที่เคยแชร์ไว้"
@@ -713,11 +749,21 @@ async def reply(
 
     # ใบที่ครบแล้วย้ายไปที่เก็บถาวร ทีละใบ หนึ่งตาปิดได้มากกว่าหนึ่งใบ
     closed = []
+    store_broke = False
     for topic in ready(reports):
-        report_id = await storage.save_report(
-            pool,
-            {"session_id": session_id, "source": source, **public(reports[topic])},
-        )
+        try:
+            report_id = await storage.save_report(
+                pool,
+                {"session_id": session_id, "source": source, **public(reports[topic])},
+            )
+        except Exception:
+            # ที่เก็บถาวรล่ม — **ห้ามลบใบทิ้ง** ปล่อยให้นอนอยู่ที่เดิมต่อไป
+            # ใบยังครบอยู่ ตาถัดไปที่เขาพิมพ์มาจะวนมาถึงตรงนี้แล้วลองเก็บใหม่เอง
+            # เขาเงียบไปเลยก็ยังมี sweeper เป็นด่านสุดท้ายตอนใบใกล้หมดอายุ
+            log.exception("เก็บใบไม่สำเร็จ ปล่อยค้างไว้ให้ลองใหม่ session=%s ใบ=%s", session_id, topic)
+            store_broke = True
+            continue
+
         closed.append((topic, report_id, public(reports[topic])))
         await draft.remove(r, session_id, topic)
 
@@ -753,6 +799,8 @@ async def reply(
         # (ไฟล์นี้ไม่รู้ว่าปุ่มหน้าตายังไง และไม่ควรรู้)
         "asking_location": asking_location,
         "asking_photo": asking_photo,
+        # ใบครบแล้วแต่เก็บไม่ลง คนเรียกควรบอกเขาว่ายังไม่เรียบร้อย อย่าปล่อยให้เชื่อว่าจบ
+        "store_broke": store_broke,
     }
 
 

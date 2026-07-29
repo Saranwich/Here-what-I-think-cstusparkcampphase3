@@ -41,6 +41,12 @@ TROUBLE = (
     "รบกวนพิมพ์มาใหม่อีกทีในอีกสักพักได้ไหมคะ 🙏"
 )
 
+# เรื่องเล่าจบครบแล้วแต่เก็บลงที่เก็บถาวรไม่ได้ — เขาต้องไม่เดินจากไปโดยเชื่อว่าเรียบร้อยแล้ว
+NOT_SAVED = (
+    "\n\n(ขออภัยค่ะ ตอนนี้ระบบบันทึกขัดข้องอยู่ เรื่องนี้ยังไม่ได้ลงระบบ "
+    "เมืองเก็บไว้ให้แล้วและจะพยายามบันทึกอีกครั้งเองนะคะ)"
+)
+
 
 def session_id(event: MessageEvent) -> str:
     """หนึ่งใบต่อหนึ่งห้องแชท — กลุ่มใช้ร่วมกัน แชทเดี่ยวแยกตามคน"""
@@ -158,10 +164,14 @@ async def answer(
         await line_client.send(reply_token, session, TROUBLE)
         return
 
+    text = result["reply"]
+    if result["store_broke"]:
+        text += NOT_SAVED
+
     await line_client.send(
         reply_token,
         session,
-        result["reply"],
+        text,
         ask_location=result["asking_location"],
         ask_photo=result["asking_photo"],
     )

@@ -7,6 +7,7 @@ geom มาจาก ST_MakePoint(longitude, latitude) — **longitude มาก
 แถวที่ไม่มี geom จะไม่ขึ้นเป็นหมุดบนแผนที่ แต่ยังใช้นับสถิติได้ ทีมปักมือทีหลังได้
 """
 
+import json
 import logging
 
 import asyncpg
@@ -37,15 +38,17 @@ COLUMNS = (
 )
 
 # ช่องที่ไม่ได้ลงคอลัมน์ตรง ๆ แต่รู้จัก — พิกัดกลายเป็น geom รูปแยกไปอีกตาราง
-_HANDLED = {"latitude", "longitude", "image_keys"}
+_HANDLED = {"latitude", "longitude", "images"}
 
 _SELECT = ", ".join(("r.id", *(f"r.{name}" for name in COLUMNS), "r.created_at"))
 
-_IMAGE_KEYS = """
+# คืนรูปในทรงเดียวกับตอนเขียนเข้าไป — [{"key": ..., "descr": ...}]
+_IMAGES = """
     COALESCE(
-        array_agg(i.image_key ORDER BY i.id) FILTER (WHERE i.image_key IS NOT NULL),
-        '{}'
-    ) AS image_keys
+        json_agg(json_build_object('key', i.image_key, 'descr', i.descr) ORDER BY i.id)
+            FILTER (WHERE i.id IS NOT NULL),
+        '[]'
+    ) AS images
 """
 
 
@@ -78,11 +81,13 @@ async def save_report(pool: asyncpg.Pool, report: dict) -> int:
             f"INSERT INTO reports ({columns}) VALUES ({holders}) RETURNING id",
             *values,
         )
-        for image_key in report.get("image_keys") or []:
+        for image in report.get("images") or []:
             await conn.execute(
-                "INSERT INTO report_images (report_id, image_key) VALUES ($1, $2)",
+                "INSERT INTO report_images (report_id, image_key, descr)"
+                " VALUES ($1, $2, $3)",
                 report_id,
-                image_key,
+                image["key"],
+                image.get("descr"),
             )
 
     return report_id
@@ -94,13 +99,14 @@ async def list_reports(pool: asyncpg.Pool) -> list[dict]:
         SELECT {_SELECT},
                ST_Y(r.geom::geometry) AS latitude,
                ST_X(r.geom::geometry) AS longitude,
-               {_IMAGE_KEYS}
+               {_IMAGES}
           FROM reports r
           LEFT JOIN report_images i ON i.report_id = r.id
       GROUP BY r.id
       ORDER BY r.id
     """)
-    return [dict(row) for row in rows]
+    # json_agg คืนมาเป็นข้อความ asyncpg ไม่แกะให้เอง
+    return [dict(row) | {"images": json.loads(row["images"])} for row in rows]
 
 
 async def last_location(pool: asyncpg.Pool, session_id: str) -> dict | None:
