@@ -637,9 +637,18 @@ async def reply(
     location_text: str | None = None,
     image_key: str | None = None,
     source: str = "user",
+    photos: int = 0,
 ) -> dict:
-    """หนึ่งตาของบทสนทนา — ตาของคนเดียวกันห้ามวิ่งพร้อมกัน ดู services/lock.py"""
+    """หนึ่งตาของบทสนทนา — ตาของคนเดียวกันห้ามวิ่งพร้อมกัน ดู services/lock.py
+
+    photos = จำนวนรูปที่แนบไปแล้วก่อนหน้าด้วย attach_photo() ใช้บอกโมเดลว่าได้มากี่ใบ
+    """
     async with lock.one_at_a_time(r, session_id):
+        if image_key:
+            if await _attach(r, pool, session_id, image_key):
+                return _attached_only()
+            photos = photos or 1
+
         return await _turn(
             r,
             pool,
@@ -648,9 +657,62 @@ async def reply(
             latitude,
             longitude,
             location_text,
-            image_key,
             source,
+            photos,
         )
+
+
+async def attach_photo(r: Redis, pool: asyncpg.Pool, session_id: str, image_key: str) -> bool:
+    """แนบรูปเข้าเรื่องที่คุยค้างอยู่ **ไม่เรียกโมเดล** คืน True ถ้าไปเกาะใบที่ปิดไปแล้ว
+
+    แยกจาก reply() เพราะรูปหลายใบที่คนกดส่งทีเดียวมาถึงเราทีละใบ ต้องแนบให้ครบก่อน
+    แล้วค่อยคุยหนึ่งตาเดียวสำหรับทั้งชุด ดู services/burst.py
+    """
+    async with lock.one_at_a_time(r, session_id):
+        return await _attach(r, pool, session_id, image_key)
+
+
+async def _attach(r: Redis, pool: asyncpg.Pool, session_id: str, image_key: str) -> bool:
+    """คืน True ถ้ารูปไปเกาะใบที่ปิดไปแล้ว = ไม่มีเรื่องค้างให้คุยต่อ"""
+    reports = await draft.load_all(r, session_id)
+
+    if not reports:
+        # ปิดใบไปแล้วแต่รูปยังตามมาทีหลัง **มันเป็นรูปของเรื่องเมื่อกี้ ไม่ใช่เรื่องใหม่**
+        finished = await draft.finished_id(r, session_id)
+        if finished is not None and await storage.add_image(pool, finished, image_key):
+            return True
+
+    topic = current_topic(reports)
+    current = reports.get(topic, {})
+    await draft.merge(
+        r,
+        session_id,
+        topic,
+        {
+            "images": current.get("images", [])
+            + [{"key": image_key, "descr": _image_descr(current)}]
+        },
+    )
+    return False
+
+
+def _attached_only() -> dict:
+    """รูปเข้าใบที่ปิดไปแล้ว ตอบเองไม่ต้องผ่านโมเดล
+
+    **ห้ามถามโมเดลตรงนี้เด็ดขาด** รูปไม่เข้าโมเดล สิ่งเดียวที่มันได้รับคือคำว่า
+    "ส่งรูปมาให้" แล้วมันจะปั้นเรื่องใหม่ขึ้นมาจากคำนั้น — เกิดขึ้นแล้วจริง ได้ใบที่
+    notes เขียนว่า "แดดร้อน ส่งรูปมาให้ดูด้วย" ทั้งที่ไม่มีใครพูดประโยคนั้น
+    """
+    return {
+        "reply": PHOTO_ADDED,
+        "report": {},
+        "report_id": None,
+        "report_ids": [],
+        "reports": {},
+        "asking_location": False,
+        "asking_photo": False,
+        "store_broke": False,
+    }
 
 
 async def _turn(
@@ -661,13 +723,13 @@ async def _turn(
     latitude: float | None = None,
     longitude: float | None = None,
     location_text: str | None = None,
-    image_key: str | None = None,
     source: str = "user",
+    photos: int = 0,
 ) -> dict:
     """คุย 1 ตา คืน {"reply", "report", "report_id", "asking_location"}
 
     latitude/longitude/location_text มาจากปุ่มแชร์ตำแหน่ง ไม่ได้มาจากการพิมพ์
-    image_key คือรูปที่เก็บไว้แล้ว **ตัวรูปไม่เข้าโมเดล** เข้าแค่ marker บอกว่ามีรูป
+    photos คือจำนวนรูปที่แนบเข้าใบไปแล้ว **ตัวรูปไม่เข้าโมเดล** เข้าแค่ marker บอกจำนวน
     source บอกว่ามาจากที่ไหน "user" = ทักมาเอง / "broadcast" = ตอบการ์ดที่เรายิงไป
     """
     reports = await draft.load_all(r, session_id)
@@ -688,41 +750,6 @@ async def _turn(
             },
         )
 
-    if image_key and not reports:
-        # ปิดใบไปแล้วแต่รูปยังตามมาอีก — คนส่งรูปรวดหลายใบ ใบแรกปิดเรื่องไปเรียบร้อย
-        # ที่เหลือจึงมาถึงตอนไม่มีใบเปิดค้างอยู่แล้ว **มันเป็นรูปของเรื่องเมื่อกี้**
-        #
-        # ห้ามถามโมเดลตรงนี้เด็ดขาด รูปไม่เข้าโมเดล สิ่งเดียวที่มันเห็นคือคำว่า
-        # "ส่งรูปมาให้" แล้วมันจะปั้นเรื่องใหม่ขึ้นมาจากคำนั้น — เกิดขึ้นแล้วจริง
-        # ได้ใบที่ notes เขียนว่า "แดดร้อน ส่งรูปมาให้ดูด้วย" ทั้งที่ไม่มีใครพูดแบบนั้น
-        #
-        # ไม่เรียกโมเดลยังเร็วกว่าด้วย รูปใบที่สองสามตอบกลับได้ทันที ไม่ต้องรอคิว
-        finished = await draft.finished_id(r, session_id)
-        if finished is not None and await storage.add_image(pool, finished, image_key):
-            return {
-                "reply": PHOTO_ADDED,
-                "report": {},
-                "report_id": finished,
-                "report_ids": [],
-                "reports": {},
-                "asking_location": False,
-                "asking_photo": False,
-                "store_broke": False,
-            }
-
-    if image_key:
-        topic = current_topic(reports)
-        current = reports.get(topic, {})
-        await draft.merge(
-            r,
-            session_id,
-            topic,
-            {
-                "images": current.get("images", [])
-                + [{"key": image_key, "descr": _image_descr(current)}]
-            },
-        )
-
     history = await memory.load(r, session_id)
     reports = await draft.load_all(r, session_id)
 
@@ -739,7 +766,7 @@ async def _turn(
             where=remembered.get("location_text") or "ตำแหน่งที่เคยแชร์ไว้"
         )
 
-    said = _with_markers(message, latitude, longitude, image_key)
+    said = _with_markers(message, latitude, longitude, photos)
     messages = (
         [{"role": "system", "content": prompt}]
         + history
@@ -927,14 +954,17 @@ def public(report: dict) -> dict:
     return {k: v for k, v in report.items() if not k.startswith("_")}
 
 
-def _with_markers(message: str, latitude, longitude, image_key) -> str:
+def _with_markers(message: str, latitude, longitude, photos: int) -> str:
     """รูป/พิกัดไม่เข้าโมเดล — ยัด marker บอกให้รู้แทน ประหยัดและไม่หลุดข้อมูลส่วนตัว"""
     markers = []
 
     if latitude is not None and longitude is not None:
         markers.append(f"[ระบบ: ผู้ใช้แชร์ตำแหน่งมาแล้ว {latitude}, {longitude}]")
 
-    if image_key:
-        markers.append("[ระบบ: ผู้ใช้ส่งรูปมาให้ 1 รูป เก็บไว้ให้แล้ว คุณดูรูปไม่ได้]")
+    if photos:
+        # บอกจำนวนจริง เขากดส่งทีเดียวหลายใบ พูดว่า "1 รูป" จะกลายเป็นไม่ได้ฟังเขา
+        markers.append(
+            f"[ระบบ: ผู้ใช้ส่งรูปมาให้ {photos} รูป เก็บไว้ให้แล้ว คุณดูรูปไม่ได้]"
+        )
 
     return " ".join(markers + [message]).strip()

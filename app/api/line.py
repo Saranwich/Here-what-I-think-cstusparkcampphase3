@@ -26,7 +26,7 @@ from app.api.deps import get_db, get_redis
 from app.clients import line as line_client
 from app.clients import media
 from app.core.config import LINE_CHANNEL_SECRET
-from app.services import survey
+from app.services import burst, survey
 
 log = logging.getLogger(__name__)
 
@@ -140,11 +140,24 @@ async def answer(
         await line_client.show_loading(session)
 
     try:
-        image_key = None
+        photos = 0
         if image_id := incoming.get("image_id"):
             # LINE เก็บรูปให้ชั่วคราว ต้องรีบมาเอาก่อนหมดอายุ
             content = await line_client.download_image(image_id)
             image_key = await media.save(image_id, content)
+            onto_closed = await survey.attach_photo(r, pool, session, image_key)
+
+            # **เขากดส่งทีเดียว 3 ใบ แต่ LINE ยิงมาให้เราทีละใบ** การซอยเป็นสามครั้ง
+            # เป็นเรื่องภายในของ LINE ไม่ใช่สิ่งที่เขาทำ ถ้าตอบทุกใบเขาจะโดนเด้ง
+            # 3 ข้อความจากการกดครั้งเดียว รอให้ชุดครบก่อน ใบสุดท้ายเป็นคนพูดแทนทั้งชุด
+            photos = await burst.settled(r, session)
+            if not photos:
+                return
+
+            if onto_closed:
+                # รูปไปเกาะเรื่องที่ปิดไปแล้ว ไม่มีอะไรค้างให้คุยต่อ
+                await line_client.send(reply_token, session, survey.PHOTO_ADDED)
+                return
 
         result = await survey.reply(
             r,
@@ -154,7 +167,7 @@ async def answer(
             latitude=incoming.get("latitude"),
             longitude=incoming.get("longitude"),
             location_text=incoming.get("location_text"),
-            image_key=image_key,
+            photos=photos,
         )
     except Exception:
         # Redis ล่ม AI ไม่ตอบ ดิสก์เต็ม — อะไรก็ตามที่เราไม่ได้เตรียมไว้
