@@ -9,7 +9,8 @@
   :root {
     --bg: #f5f4f1;  --panel: #fff;  --line: #e0ddd6;
     --ink: #26241f;  --dim: #6f6a60;
-    --heat: #d9534f;  --flood: #3b82c4;  --access: #b8860b;  --other: #6f6a60;
+    --heat: #d9534f;  --flood: #3b82c4;  --access: #b8860b;
+    --lighting: #7b5ea7;  --waste: #4f8a5b;  --other: #6f6a60;
   }
   * { box-sizing: border-box; }
   body {
@@ -29,13 +30,16 @@
     background: #eeece6; color: var(--dim);
   }
   .chip b { color: var(--ink); }
+  .tallynote { flex-basis: 100%; font-size: 11px; color: var(--dim); margin-top: 2px; }
   .empty { color: var(--dim); font-size: 14px; line-height: 1.7; }
 
   .card { border-top: 1px solid var(--line); padding-top: 14px; }
   .cat {
     display: inline-block; font-size: 11px; color: #fff;
-    padding: 2px 8px; border-radius: 3px; margin-bottom: 8px;
+    padding: 2px 8px; border-radius: 3px; margin: 0 4px 8px 0;
   }
+  /* หัวข้อรองของใบเดียวกัน — เห็นว่ามีอีก แต่ไม่แย่งสายตาไปจากเรื่องหลัก */
+  .cat.alt { background: none; }
   .card h2 { font-size: 16px; margin: 0 0 10px; line-height: 1.4; }
   .notes { font-size: 14px; line-height: 1.75; margin-bottom: 16px; }
 
@@ -76,10 +80,12 @@
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
 const CAT = {
-  heat:   { name: "ความร้อน",     color: getVar("--heat") },
-  flood:  { name: "น้ำท่วม",       color: getVar("--flood") },
-  access: { name: "การเข้าถึง",    color: getVar("--access") },
-  other:  { name: "อื่น ๆ",        color: getVar("--other") },
+  heat:     { name: "ความร้อน",     color: getVar("--heat") },
+  flood:    { name: "น้ำท่วม",       color: getVar("--flood") },
+  access:   { name: "การเข้าถึง",    color: getVar("--access") },
+  lighting: { name: "ไฟส่องสว่าง",   color: getVar("--lighting") },
+  waste:    { name: "ขยะ น้ำเสีย",   color: getVar("--waste") },
+  other:    { name: "อื่น ๆ",        color: getVar("--other") },
 };
 const SEVERITY  = { low: "เล็กน้อย", medium: "ปานกลาง", high: "หนัก" };
 const FREQUENCY = { once: "เกิดครั้งเดียว", occasional: "เกิดเป็นครั้งคราว", recurring: "เกิดซ้ำ ๆ" };
@@ -91,6 +97,9 @@ const TIMES = { morning: "เช้า", afternoon: "บ่าย", evening: "�
 
 function getVar(n) { return getComputedStyle(document.documentElement).getPropertyValue(n).trim(); }
 function cat(c) { return CAT[c] || CAT.other; }
+// หนึ่งใบติดได้หลายหัวข้อ ตัวแรกคือเรื่องหลัก — หมุดมีสีเดียว ต้องมีกฎว่าใครได้สี
+function cats(r) { return (r.categories || []).length ? r.categories : ["other"]; }
+function main(r) { return cats(r)[0]; }
 function esc(s) {
   return String(s ?? "").replace(/[&<>"]/g, m => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;" }[m]));
 }
@@ -117,16 +126,19 @@ function draw(reports) {
   document.getElementById("sub").textContent =
     `${reports.length} เรื่อง · ปักหมุดได้ ${pinned.length} · ยังไม่มีหมุด ${loose.length}`;
 
+  // หนึ่งใบนับได้หลายหัวข้อ **ผลรวมจึงเกินจำนวนใบได้ ไม่ใช่บั๊ก** มีคำกำกับใต้ป้าย
   const tally = {};
-  reports.forEach(r => tally[r.category] = (tally[r.category] || 0) + 1);
+  reports.forEach(r => cats(r).forEach(c => tally[c] = (tally[c] || 0) + 1));
   document.getElementById("counts").innerHTML = Object.entries(tally)
+    .sort((a, b) => b[1] - a[1])
     .map(([c, n]) => `<span class="chip" style="border-left:3px solid ${cat(c).color}">
-        ${cat(c).name} <b>${n}</b></span>`).join("");
+        ${cat(c).name} <b>${n}</b></span>`).join("")
+    + `<div class="tallynote">หนึ่งเรื่องติดได้หลายหัวข้อ ผลรวมจึงมากกว่าจำนวนเรื่อง</div>`;
 
   pinned.forEach(r => {
     const m = L.circleMarker([r.latitude, r.longitude], {
       radius: 9, color: "#fff", weight: 2,
-      fillColor: cat(r.category).color, fillOpacity: 0.95,
+      fillColor: cat(main(r)).color, fillOpacity: 0.95,
     }).addTo(map);
     m.on("click", () => show(r));
     marks[r.id] = m;
@@ -183,8 +195,11 @@ function show(r) {
 
   document.getElementById("detail").className = "card";
   document.getElementById("detail").innerHTML = `
-    <span class="cat" style="background:${cat(r.category).color}">
-      ${cat(r.category).name}${r.severity ? " · " + SEVERITY[r.severity] : ""}</span>
+    <span class="cat" style="background:${cat(main(r)).color}">
+      ${cat(main(r)).name}${r.severity ? " · " + SEVERITY[r.severity] : ""}</span>
+    ${cats(r).slice(1).map(c => `<span class="cat alt"
+       style="color:${cat(c).color};box-shadow:inset 0 0 0 1px ${cat(c).color}">
+       ${cat(c).name}</span>`).join("")}
     <h2>${esc(r.title || "(ไม่มีพาดหัว)")}</h2>
     <div class="notes">${esc(r.notes)}</div>
     <dl>${rows.join("")}</dl>

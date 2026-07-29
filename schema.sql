@@ -18,7 +18,11 @@ CREATE TABLE reports (
     created_at    timestamptz NOT NULL DEFAULT now(),
 
     -- สองช่องนี้เท่านั้นที่บังคับ ตรงกับ missing() ใน services/survey.py
-    category      text        NOT NULL,               -- heat | flood | access | other
+    --
+    -- categories ติดได้หลายอันต่อหนึ่งใบ เพราะเรื่องเดียวกันในจุดเดียวมักมีหลายอย่าง
+    -- ("น้ำท่วมแล้วกลางคืนไฟก็มืด") **ตัวแรกคือเรื่องหลัก** หมุดบนแผนที่มีสีเดียว
+    -- จึงต้องมีกฎว่าใครได้สี — ดู CATEGORIES ใน services/survey.py
+    categories    text[]      NOT NULL,               -- heat|flood|access|lighting|waste|other
     notes         text        NOT NULL,               -- ฉบับเรียบเรียงให้ทีมอ่าน
 
     title         text,                               -- พาดหัวบนหมุด
@@ -42,7 +46,7 @@ CREATE TABLE reports (
     no_photo      boolean     NOT NULL DEFAULT false
 );
 
--- ไม่มี CHECK constraint ที่ category / severity / frequency ทั้งที่ใส่ได้
+-- ไม่มี CHECK constraint ที่ categories / severity / frequency ทั้งที่ใส่ได้
 -- เพราะ _sanitize() ใน services/survey.py กรองค่านอกรายการทิ้งก่อนถึงตรงนี้แล้ว
 -- ถ้าใส่ CHECK ค่าเพี้ยนช่องเดียวจะทำ INSERT ล้มทั้งแถว = เสียเรื่องที่เขาอุตส่าห์เล่าทั้งใบ
 -- ชั้นแอปกรอง ชั้นนี้รับ

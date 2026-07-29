@@ -2,8 +2,8 @@
 
 Redis Hash: key เดียว `survey:{session_id}` ช่องย่อยหนึ่งช่อง = หนึ่งใบ
     survey:U_alice
-        "น้ำท่วมซอย 5"   {"category": "flood", "notes": "...", "_seq": 0}
-        "หมาจรจัด"        {"category": "other", "notes": "...", "_seq": 1}
+        "น้ำท่วมซอย 5"   {"categories": ["flood"], "notes": "...", "_seq": 0}
+        "หมาจรจัด"        {"categories": ["other"], "notes": "...", "_seq": 1}
 
 ที่เลือกยัดทั้งใบเป็น JSON ในช่องเดียว แทนที่จะแตกเป็นคนละ key
 เพราะ TTL ผูกกับ key ไม่ได้ผูกกับช่อง — key เดียวจึงหมดอายุพร้อมกันทั้งชุด

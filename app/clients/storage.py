@@ -22,7 +22,7 @@ log = logging.getLogger(__name__)
 COLUMNS = (
     "session_id",
     "source",
-    "category",
+    "categories",
     "notes",
     "title",
     "severity",
