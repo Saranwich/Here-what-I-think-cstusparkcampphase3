@@ -372,6 +372,11 @@ SYSTEM_PROMPT = """คุณคือ "น้องเมือง" **ผู้�
 เรื่องข้อมูลที่ระบบส่งมาให้ในวงเล็บ [ระบบ: ...]:
 - นั่นคือของจริงจากแอป ไม่ใช่คำพูดของชาวบ้าน เชื่อได้เลย
 - ห้ามพูดถึงวงเล็บนั้นตรง ๆ กับชาวบ้าน ให้คุยเหมือนคนปกติ
+- **ห้ามลอกข้อความในวงเล็บนั้นลงช่องไหนทั้งสิ้น** โดยเฉพาะ notes
+  มันเป็นเสียงของระบบ ไม่ใช่เรื่องที่เขาเล่า เคยหลุดไปแล้วจริง ได้ notes ว่า
+  "แดดร้อนที่ทางเข้าชุมชน ส่งรูปมาให้ดูด้วย" ทั้งที่ไม่มีใครพูดท่อนหลัง
+- ตาที่เขาส่งมาแต่รูปจะไม่มีตัวอักษรของเขาเลย **นั่นไม่ได้แปลว่าเขาเงียบ**
+  แปลว่าเขาส่งรูป ให้ดูจากวงเล็บว่าได้มากี่รูป
 
 กติกา:
 - ทุกครั้งที่ได้ข้อมูลใหม่ ให้เรียก record_report ทันที การพิมพ์ว่าจดแล้วไม่มีผล
@@ -517,6 +522,25 @@ def is_complete(report: dict) -> bool:
 _GOAL_URGENCY = {"location": 1, "photo": 2}
 
 
+def _needs_pin(reports: dict, just_closed: bool) -> bool:
+    """ควรโชว์ปุ่มส่งตำแหน่งไหม
+
+    เดิมโชว์เฉพาะตาที่โค้ดกำลังโฟกัสเรื่องตำแหน่งพอดี แต่โมเดลพูดถึงปุ่มได้ทุกเมื่อ
+    เคยเจอ: โมเดลบอก "กดปุ่มข้างล่างได้เลยค่ะ" แล้วชาวบ้านตอบกลับมาว่า
+    **"ปุ่มไม่ขึ้นอ่ะน้อง"** เพราะตอนนั้นใบเพิ่งปิดไป โค้ดเลยไม่ได้ส่งปุ่มไปด้วย
+
+    **ปุ่มที่ขึ้นเกินไม่มีใครเดือดร้อน ปุ่มที่ควรขึ้นแล้วไม่ขึ้นทำให้คนแก่ไปต่อไม่ได้**
+    """
+    if not reports:
+        # ปิดใบไปหมาด ๆ เขาอาจกำลังจะเล่าเรื่องต่อไปและอยากส่งตำแหน่งก่อนเล่า
+        return just_closed
+
+    return any(
+        rep.get("latitude") is None and not rep.get("no_location")
+        for rep in reports.values()
+    )
+
+
 def focus(reports: dict) -> tuple[str, str] | None:
     """ตานี้ควรคุยเรื่องไหนต่อ และยังขาดอะไร — คืน (ชื่อเรื่อง, สิ่งที่ขาด)
 
@@ -591,6 +615,53 @@ _CLOSING = (
     "แล้วบอกว่าเรื่องนี้จะไปถึงทีมที่ออกแบบปรับปรุงพื้นที่ ขอบคุณที่สละเวลาเล่า "
     "**ห้ามรายงานสถานะของเอกสาร** มันฟังดูเหมือนเสมียน ห้ามสัญญาว่าจะไปแก้ให้"
 )
+
+
+_HELD_NAMES = {
+    "category": "ประเภทเรื่อง",
+    "notes": "เรื่องที่เขาเล่า",
+    "title": "พาดหัว",
+    "severity": "ระดับความหนัก",
+    "cause_said": "สาเหตุที่เขาบอก",
+    "affect_desc": "ความเดือดร้อน",
+    "affect_tags": "ด้านที่กระทบ",
+    "occurred_said": "ช่วงที่เกิด",
+    "frequency": "ความถี่",
+    "time_of_day": "เวลาในวัน",
+    "location_text": "ที่อยู่ที่เขาบอก",
+}
+
+
+def _held(reports: dict) -> str:
+    """บอกโมเดลว่าตอนนี้ในใบมีอะไรอยู่แล้วบ้าง
+
+    **ของที่มีอยู่แล้วสำคัญพอ ๆ กับของที่ขาด** ถ้ารู้แต่ว่าขาดอะไร พอเขาถามว่า
+    "รูปที่ส่งไปได้ไหม" มันจะไม่มีข้อมูลตอบแล้วเดาเอาว่าไม่ได้ ซึ่งเกิดขึ้นแล้วจริง
+    """
+    if not reports:
+        return ""
+
+    lines = []
+    for topic, report in sorted(reports.items(), key=lambda kv: kv[1].get("_seq", 0)):
+        got = [name for field, name in _HELD_NAMES.items() if report.get(field)]
+
+        if images := report.get("images"):
+            got.append(f"รูป {len(images)} รูป")
+        if report.get("latitude") is not None:
+            got.append("พิกัดจากปุ่มแชร์ตำแหน่ง")
+        if report.get("no_location"):
+            got.append("เขาบอกแล้วว่าแชร์ตำแหน่งไม่ได้")
+        if report.get("no_photo"):
+            got.append("เขาบอกแล้วว่าถ่ายรูปไม่ได้")
+
+        lines.append(f"- {label(topic, report)} มีแล้ว: {', '.join(got) or 'ยังไม่มีอะไร'}")
+
+    return (
+        "\n\n**ตอนนี้คุณถืออะไรอยู่บ้าง**\n"
+        + "\n".join(lines)
+        + "\nเขาถามว่าของที่ส่งมาถึงหรือยัง ให้ตอบจากรายการนี้ **ห้ามเดา** "
+        "และห้ามบอกว่าไม่ได้รับ ถ้ารายการข้างบนบอกว่าได้รับแล้ว"
+    )
 
 
 def _status(reports: dict) -> str:
@@ -754,9 +825,16 @@ async def _turn(
     reports = await draft.load_all(r, session_id)
 
     # เพิ่งปิดใบไปหมาด ๆ — อย่าเพิ่งรีบเปิดใบใหม่ใส่เขา
+    just_closed = not reports and await draft.just_finished(r, session_id)
     prompt = SYSTEM_PROMPT
-    if not reports and await draft.just_finished(r, session_id):
+    if just_closed:
         prompt += JUST_FINISHED_NOTE
+
+    # บอกไปด้วยว่าตอนนี้ในใบมีอะไรอยู่แล้ว ไม่ใช่บอกแต่ว่าขาดอะไร
+    # เคยเจอ: เขาถามว่า "พึ่งแนบไปนะ?" แล้วบอทตอบว่ายังไม่เห็นรูป
+    # ทั้งที่รูปเข้าใบไปแล้ว 4 ใบ เพราะไม่เคยมีใครบอกมันว่าถืออะไรอยู่
+    if held := _held(reports):
+        prompt += held
 
     # เคยแจ้งตำแหน่งไว้ในใบก่อน ๆ มั้ย — ถามจากที่เก็บหลัก ไม่ได้กองไว้ใน Redis
     known = any(has_location(rep) for rep in reports.values())
@@ -822,8 +900,8 @@ async def _turn(
     text = answer["content"].strip() or "ขอโทษครับ ช่วยเล่าอีกครั้งได้ไหม"
 
     spot = focus(reports)
-    asking_location = spot is not None and spot[1] == "location"
     asking_photo = spot is not None and spot[1] == "photo"
+    asking_location = not asking_photo and _needs_pin(reports, just_closed)
 
     # ใบที่ครบแล้วย้ายไปที่เก็บถาวร ทีละใบ หนึ่งตาปิดได้มากกว่าหนึ่งใบ
     closed = []
@@ -854,7 +932,10 @@ async def _turn(
             session_id,
             closed[0][1],
             history
-            + [{"role": "user", "content": message}, {"role": "assistant", "content": text}],
+            + [
+                {"role": "user", "content": message or said},
+                {"role": "assistant", "content": text},
+            ],
         )
 
     # ล้างความจำได้ต่อเมื่อ**ไม่เหลือใบค้างเลย** ปิดใบหนึ่งแล้วล้างทิ้งทั้งที่ยังมี
@@ -863,7 +944,9 @@ async def _turn(
         await memory.clear(r, session_id)
         await draft.mark_done(r, session_id, closed[0][1])
     else:
-        await memory.append(r, session_id, "user", message)
+        # ตาที่เป็นรูปล้วนไม่มีตัวอักษรของเขาเลย เก็บ marker แทน ไม่งั้นประวัติจะมี
+        # บรรทัดว่างที่โมเดลอ่านไม่ออกว่าเกิดอะไรขึ้นตานั้น
+        await memory.append(r, session_id, "user", message or said)
         await memory.append(r, session_id, "assistant", text)
 
     return {
