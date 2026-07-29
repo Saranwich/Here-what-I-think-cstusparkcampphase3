@@ -626,10 +626,6 @@ MAX_TOOL_ROUNDS = 3   # กันโมเดลวนเรียก tool ไ�
 # รูปที่ตามมาหลังปิดใบ — ตอบเองไม่ต้องผ่านโมเดล ดูเหตุผลตรงที่ใช้
 PHOTO_ADDED = "ได้รูปเพิ่มแล้วค่ะ แนบไปกับเรื่องเมื่อกี้ให้เรียบร้อยแล้วนะคะ 🙏"
 
-# ส่งรูปรวด 5 ใบแล้วเด้ง "ได้รูปแล้วค่ะ" 4 ครั้งคือสแปม ไม่ใช่ความใส่ใจ
-# รับรู้ครั้งเดียวต่อชุด ที่เหลือเงียบ — คนส่งเห็นอยู่แล้วว่าตัวเองส่งอะไรไปบ้าง
-BURST_QUIET_SECONDS = 20
-
 
 async def reply(
     r: Redis,
@@ -703,11 +699,8 @@ async def _turn(
         # ไม่เรียกโมเดลยังเร็วกว่าด้วย รูปใบที่สองสามตอบกลับได้ทันที ไม่ต้องรอคิว
         finished = await draft.finished_id(r, session_id)
         if finished is not None and await storage.add_image(pool, finished, image_key):
-            first = await r.set(
-                f"acked:{session_id}", 1, ex=BURST_QUIET_SECONDS, nx=True
-            )
             return {
-                "reply": PHOTO_ADDED if first else "",
+                "reply": PHOTO_ADDED,
                 "report": {},
                 "report_id": finished,
                 "report_ids": [],

@@ -168,10 +168,6 @@ async def answer(
     if result["store_broke"]:
         text += NOT_SAVED
 
-    if not text:
-        # ตั้งใจเงียบ — รูปใบที่สองสามในชุดเดียวกัน รับรู้ไปแล้วครั้งหนึ่ง
-        return
-
     await line_client.send(
         reply_token,
         session,
