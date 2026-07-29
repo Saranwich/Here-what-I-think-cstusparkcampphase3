@@ -10,6 +10,7 @@ load_dotenv(BASE_DIR / ".env")
 
 API_KEY = os.getenv("API_KEY")
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+DATABASE_URL = os.getenv("DATABASE_URL")
 LINE_CHANNEL_SECRET = os.getenv("LINE_CHANNEL_SECRET")
 LINE_CHANNEL_ACCESS_TOKEN = os.getenv("LINE_CHANNEL_ACCESS_TOKEN")
 OPENAI_API_ENDPOINT = os.getenv("OPENAI_API_ENDPOINT")
