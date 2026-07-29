@@ -16,7 +16,7 @@ async def lifespan(app: FastAPI):
     await app.state.redis.ping()
     app.state.db = await db.create_pool()
     # ตาข่ายรองรับ เก็บใบที่ใกล้หมดอายุก่อนหาย — ดูเหตุผลใน services/sweeper.py
-    sweep = asyncio.create_task(sweeper.run_forever(app.state.redis))
+    sweep = asyncio.create_task(sweeper.run_forever(app.state.redis, app.state.db))
     print("app opened")
     try:
         yield

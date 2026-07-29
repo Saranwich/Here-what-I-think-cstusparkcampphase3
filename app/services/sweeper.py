@@ -16,6 +16,7 @@
 import asyncio
 import logging
 
+import asyncpg
 from redis.asyncio import Redis
 
 from app.clients import storage
@@ -35,7 +36,7 @@ def _session_of(key: str) -> str | None:
     return parts[1]
 
 
-async def rescue(r: Redis) -> int:
+async def rescue(r: Redis, pool: asyncpg.Pool) -> int:
     """กวาดหนึ่งรอบ คืนจำนวนใบที่เก็บทัน"""
     saved = 0
 
@@ -54,11 +55,12 @@ async def rescue(r: Redis) -> int:
                 continue
 
             report_id = await storage.save_report(
+                pool,
                 {
                     "session_id": session_id,
                     "source": "rescued",
                     **survey.public(report),
-                }
+                },
             )
             await draft.remove(r, session_id, topic)
             saved += 1
@@ -72,12 +74,12 @@ async def rescue(r: Redis) -> int:
     return saved
 
 
-async def run_forever(r: Redis) -> None:
+async def run_forever(r: Redis, pool: asyncpg.Pool) -> None:
     """วนกวาดไปเรื่อย ๆ — ล้มแล้วต้องไม่ทำให้ทั้งแอปตายตาม"""
     while True:
         try:
             await asyncio.sleep(SWEEP_EVERY)
-            await rescue(r)
+            await rescue(r, pool)
         except asyncio.CancelledError:
             raise
         except Exception:

@@ -1,9 +1,10 @@
 """Endpoints for poking at things during development."""
 
+import asyncpg
 from fastapi import APIRouter, Depends
 from redis.asyncio import Redis
 
-from app.api.deps import get_redis
+from app.api.deps import get_db, get_redis
 from app.clients import llm, storage
 from app.services import chat, draft, memory, survey
 
@@ -40,12 +41,21 @@ async def survey_test(
     image_key: str | None = None,
     source: str = "user",
     r: Redis = Depends(get_redis),
+    pool: asyncpg.Pool = Depends(get_db),
 ):
     """น้องเมือง, without LINE. latitude/longitude/location_text stand in for the
     share-location button, image_key for a photo that was already stored;
     source is "broadcast" when replying to a card we pushed."""
     return await survey.reply(
-        r, session_id, message, latitude, longitude, location_text, image_key, source
+        r,
+        pool,
+        session_id,
+        message,
+        latitude,
+        longitude,
+        location_text,
+        image_key,
+        source,
     )
 
 
@@ -87,6 +97,6 @@ async def survey_reset(session_id: str = "devtest", r: Redis = Depends(get_redis
 
 
 @router.get("/reports")
-async def reports():
+async def reports(pool: asyncpg.Pool = Depends(get_db)):
     """Everything that made it to the permanent store."""
-    return await storage.list_reports()
+    return await storage.list_reports(pool)

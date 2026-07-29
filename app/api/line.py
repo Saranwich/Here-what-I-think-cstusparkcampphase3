@@ -10,6 +10,7 @@ AI คิดนานกว่านั้นแน่ เลยตอบ 200 �
 
 import logging
 
+import asyncpg
 from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Request
 from linebot.v3 import WebhookParser
 from linebot.v3.exceptions import InvalidSignatureError
@@ -21,7 +22,7 @@ from linebot.v3.webhooks import (
 )
 from redis.asyncio import Redis
 
-from app.api.deps import get_redis
+from app.api.deps import get_db, get_redis
 from app.clients import line as line_client
 from app.clients import media
 from app.core.config import LINE_CHANNEL_SECRET
@@ -88,6 +89,7 @@ async def callback(
     background_tasks: BackgroundTasks,
     x_line_signature: str = Header(...),
     r: Redis = Depends(get_redis),
+    pool: asyncpg.Pool = Depends(get_db),
 ):
     # ลายเซ็นคิดจาก body ดิบ ต้องอ่านก่อนแปลง
     body = (await request.body()).decode()
@@ -108,6 +110,7 @@ async def callback(
         background_tasks.add_task(
             answer,
             r,
+            pool,
             session_id(event),
             event.reply_token,
             is_direct(event),
@@ -120,6 +123,7 @@ async def callback(
 
 async def answer(
     r: Redis,
+    pool: asyncpg.Pool,
     session: str,
     reply_token: str,
     direct: bool,
@@ -138,6 +142,7 @@ async def answer(
 
         result = await survey.reply(
             r,
+            pool,
             session,
             incoming["said"],
             latitude=incoming.get("latitude"),

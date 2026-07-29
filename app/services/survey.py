@@ -12,6 +12,7 @@
 (แม้แต่ในคอมเมนต์ก็เลี่ยงคำต้องห้าม เพราะ grep ในกฎข้อ 2 จับคำ ไม่ได้จับความหมาย)
 """
 
+import asyncpg
 from redis.asyncio import Redis
 
 from app.clients import llm, storage, transcript
@@ -592,6 +593,7 @@ MAX_TOOL_ROUNDS = 3   # กันโมเดลวนเรียก tool ไ�
 
 async def reply(
     r: Redis,
+    pool: asyncpg.Pool,
     session_id: str,
     message: str,
     latitude: float | None = None,
@@ -644,7 +646,7 @@ async def reply(
 
     # เคยแจ้งตำแหน่งไว้ในใบก่อน ๆ มั้ย — ถามจากที่เก็บหลัก ไม่ได้กองไว้ใน Redis
     known = any(has_location(rep) for rep in reports.values())
-    remembered = None if known else await storage.last_location(session_id)
+    remembered = None if known else await storage.last_location(pool, session_id)
     if remembered:
         prompt += LAST_LOCATION_NOTE.format(
             where=remembered.get("location_text") or "ตำแหน่งที่เคยแชร์ไว้"
@@ -713,7 +715,8 @@ async def reply(
     closed = []
     for topic in ready(reports):
         report_id = await storage.save_report(
-            {"session_id": session_id, "source": source, **public(reports[topic])}
+            pool,
+            {"session_id": session_id, "source": source, **public(reports[topic])},
         )
         closed.append((topic, report_id, public(reports[topic])))
         await draft.remove(r, session_id, topic)
